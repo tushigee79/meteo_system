@@ -1,18 +1,13 @@
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include # 'include' нэмэв
 from django.conf import settings
 from django.conf.urls.static import static
-from django.shortcuts import redirect
-
-
-def root_redirect(request):
-    return redirect('/admin/')
-
 
 urlpatterns = [
-    path('', root_redirect),
     path('admin/', admin.site.urls),
-    path('chaining/', include('smart_selects.urls')),
+    # inventory апп-ын замуудыг холбох
+    path('inventory/', include('inventory.urls')), 
+    path('', admin.site.urls),
 ]
 
 if settings.DEBUG:
