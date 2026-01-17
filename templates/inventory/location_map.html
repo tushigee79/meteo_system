@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Байршлын газрын зураг</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background:#fff; }
+    .hdr { padding: 10px 14px; font-weight: 700; border-bottom:1px solid #eee; }
+    #map { height: calc(100vh - 44px); width: 100%; }
+
+    .ctrl {
+      background: white;
+      padding: 10px 10px 8px 10px;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,.25);
+      font-size: 12px;
+      line-height: 1.4;
+      min-width: 240px;
+    }
+    .ctrl label { display:block; font-weight: 700; margin: 0 0 4px 0; }
+    .ctrl select, .ctrl input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 7px 8px;
+      margin: 0 0 8px 0;
+      border: 1px solid #ddd;
+      border-radius: 7px;
+      outline: none;
+    }
+    .ctrl small { color:#666; }
+
+    .legend {
+      background: white;
+      padding: 8px 10px;
+      font-size: 12px;
+      line-height: 1.4;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,.25);
+    }
+    .dot {
+      display:inline-block;
+      width:10px;height:10px;border-radius:50%;
+      margin-right:6px; vertical-align: middle;
+    }
+
+    /* AWS icon */
+    .awsIcon {
+      font-size: 16px;
+      line-height: 16px;
+      transform: translate(-2px, -2px);
+      text-shadow: 0 0 2px rgba(0,0,0,.35);
+    }
+  </style>
+</head>
+<body>
+
+<div class="hdr">Байршлын газрын зураг</div>
+<div id="map"></div>
+
+{# ✅ Safe JSON injection #}
+{{ locations_json|json_script:"locations-data" }}
+
+<script>
+  const map = L.map("map").setView([47.9, 103.0], 6);
+
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18 })
+    .addTo(map);
+
+  const points = JSON.parse(document.getElementById("locations-data").textContent || "[]");
+
+  function colorByType(t){
+    if (t === "METEO") return "#1f77b4";
+    if (t === "HYDRO") return "#2ca02c";
+    if (t === "AWS")   return "#ff7f0e";
+    return "#999999";
+  }
+
+  function radiusByDeviceCount(n){
+    const x = Number(n ?? 0);
+    // 4..16 орчим, лог өсөлт
+    return 4 + Math.min(12, Math.log10(1 + Math.max(0, x)) * 6);
+  }
+
+  function normStr(s){
+    return String(s ?? "").toLowerCase().trim();
+  }
+
+  // --- Build aimag list ---
+  const aimags = new Set();
+  for (const p of points) aimags.add(p.aimag || "Тодорхойгүй");
+  const aimagList = ["Бүгд", ...Array.from(aimags).sort((a,b)=>a.localeCompare(b))];
+
+  // --- Controls ---
+  const ctrl = L.control({position: "topleft"});
+  ctrl.onAdd = function(){
+    const div = L.DomUtil.create("div", "ctrl");
+    div.innerHTML = `
+      <label>Аймаг</label>
+      <select id="aimagFilter"></select>
+
+      <label>Хайлт (станцын нэр)</label>
+      <input id="nameSearch" placeholder="Ж: Тариат" />
+
+      <div id="stat"><small>Ачаалж байна...</small></div>
+    `;
+    return div;
+  };
+  ctrl.addTo(map);
+
+  const ctrlEl = document.querySelector(".ctrl");
+  L.DomEvent.disableClickPropagation(ctrlEl);
+  L.DomEvent.disableScrollPropagation(ctrlEl);
+
+  const aimagSelect = document.getElementById("aimagFilter");
+  const nameSearch = document.getElementById("nameSearch");
+  const stat = document.getElementById("stat");
+
+  for (const a of aimagList) {
+    const opt = document.createElement("option");
+    opt.value = a;
+    opt.textContent = a;
+    aimagSelect.appendChild(opt);
+  }
+
+  const renderLayer = L.layerGroup().addTo(map);
+
+  const awsDivIcon = L.divIcon({
+    className: "awsIcon",
+    html: "🟠",
+    iconSize: [16,16]
+  });
+
+  function makeMarker(p){
+    const lat = Number(p.lat);
+    const lon = Number(p.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+    const type = p.type || "UNKNOWN";
+    const color = colorByType(type);
+    const devCount = Number(p.device_count ?? 0);
+    const aimag = p.aimag || "Тодорхойгүй";
+
+    let marker;
+    if (type === "AWS") {
+      marker = L.marker([lat, lon], { icon: awsDivIcon });
+    } else {
+      marker = L.circleMarker([lat, lon], {
+        radius: radiusByDeviceCount(devCount),
+        color: color,
+        weight: 2,
+        fillColor: color,
+        fillOpacity: 0.85
+      });
+    }
+
+    const status = p.status ?? "";
+    marker.bindPopup(
+      `<b>${p.name ?? ""}</b>
+       <br>Аймаг: ${aimag}
+       <br>Төрөл: ${type}
+       <br>Төлөв: ${status}
+       <br><b>Багажийн тоо:</b> ${devCount}`
+    );
+
+    marker.__data = { aimag, name: (p.name ?? "") };
+    return marker;
+  }
+
+  const markers = [];
+  for (const p of points) {
+    const m = makeMarker(p);
+    if (m) markers.push(m);
+  }
+
+  function render(){
+    const selectedAimag = aimagSelect.value;
+    const q = normStr(nameSearch.value);
+
+    renderLayer.clearLayers();
+
+    let shown = 0;
+    for (const m of markers) {
+      const d = m.__data;
+
+      if (selectedAimag !== "Бүгд" && d.aimag !== selectedAimag) continue;
+      if (q && !normStr(d.name).includes(q)) continue;
+
+      renderLayer.addLayer(m);
+      shown++;
+    }
+
+    stat.innerHTML = `<b>Харагдаж буй цэг:</b> ${shown} / ${markers.length}`;
+  }
+
+  aimagSelect.addEventListener("change", render);
+  nameSearch.addEventListener("input", render);
+
+  render();
+
+  // --- Legend ---
+  const legend = L.control({position: "bottomright"});
+  legend.onAdd = function () {
+    const div = L.DomUtil.create("div", "legend");
+    div.innerHTML =
+      "<b>Тайлбар</b><br>" +
+      '<span class="dot" style="background:#1f77b4"></span> METEO<br>' +
+      '<span class="dot" style="background:#2ca02c"></span> HYDRO<br>' +
+      '<span style="display:inline-block;width:16px">🟠</span> AWS<br>' +
+      "<small>Том цэг = багаж их</small>";
+    return div;
+  };
+  legend.addTo(map);
+</script>
+
+</body>
+</html>
