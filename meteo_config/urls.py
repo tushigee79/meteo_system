@@ -2,15 +2,13 @@ from django.contrib import admin
 from django.urls import path, include
 from django.views.generic import RedirectView
 from django.conf import settings
-from django.conf.urls.static import static
+from django.contrib import admin # Стандарт admin-ийг импортлох
+from django.urls import path
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 
 urlpatterns = [
-    path("", RedirectView.as_view(url="/admin/", permanent=False), name="home"),
-    path("admin/", admin.site.urls),
-
-    path("chaining/", include("smart_selects.urls")),
-    path("inventory/", include("inventory.urls")),
+    path('admin/', admin.site.urls), # Энд admin.site.urls гэж шууд бичнэ
+    path('', admin.site.urls),
 ]
 
 if settings.DEBUG:
