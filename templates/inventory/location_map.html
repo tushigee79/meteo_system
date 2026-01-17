@@ -13,7 +13,6 @@
         .hdr { padding: 12px 18px; font-weight: 700; background: #2c3e50; color: white; display: flex; align-items: center; gap: 10px; }
         #map { height: calc(100vh - 48px); width: 100%; }
 
-        /* Шүүлтүүрийн удирдлага */
         .ctrl {
             background: white; padding: 15px; border-radius: 10px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.15); font-size: 13px; min-width: 240px;
@@ -24,7 +23,6 @@
             border: 1px solid #dcdde1; border-radius: 5px; box-sizing: border-box; 
         }
 
-        /* Төрөл шүүх (Legend) хэсэг */
         .legend {
             background: white; padding: 12px; border-radius: 10px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.15); line-height: 26px; color: #2f3640;
@@ -50,7 +48,7 @@
 <script id="locations-data" type="application/json">{{ locations_json|safe }}</script>
 
 <script>
-    // 1. Газрын зургийн суурь тохиргоо
+    // 1. Суурь тохиргоо
     const map = L.map("map").setView([46.8625, 103.8467], 5);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18 }).addTo(map);
 
@@ -60,12 +58,10 @@
     } catch (e) { console.error("Data error:", e); }
 
     const renderLayer = L.layerGroup().addTo(map);
-    
-    // METEO, HYDRO, AWS шүүлтүүрүүдийг сэргээв
     let activeTypes = { "METEO": true, "HYDRO": true, "AWS": true };
     const typeColors = { "METEO": "#1f77b4", "HYDRO": "#2ca02c", "AWS": "#ff7f0e" };
 
-    // 2. Зүүн дээд талын шүүлтүүрийн удирдлага
+    // 2. Шүүлтүүрийн удирдлага
     const filterCtrl = L.control({position: "topleft"});
     filterCtrl.onAdd = function() {
         const div = L.DomUtil.create("div", "ctrl");
@@ -89,7 +85,7 @@
     };
     filterCtrl.addTo(map);
 
-    // 3. Баруун доод талын төрөл шүүлтүүр (Legend)
+    // 3. Legend
     const legend = L.control({position: "bottomright"});
     legend.onAdd = function() {
         const div = L.DomUtil.create("div", "legend");
@@ -112,13 +108,12 @@
     const nameSearch = document.getElementById("nameSearch");
     const stat = document.getElementById("stat");
 
-    // 4. Аймгуудыг Монгол хэлээр эрэмбэлж бөглөх
     const aimags = [...new Set(points.map(p => p.aimag))].sort((a, b) => a.localeCompare(b, 'mn'));
     aimags.forEach(a => {
-        if(a !== "Тодорхойгүй") aimagSelect.innerHTML += `<option value="${a}">${a}</option>`;
+        if(a && a !== "Тодорхойгүй") aimagSelect.innerHTML += `<option value="${a}">${a}</option>`;
     });
 
-    // 5. Үндсэн Render функц (Шүүлтүүрийн логик)
+    // 4. Үндсэн Render функц
     function render() {
         const selAimag = aimagSelect.value;
         const selOrg = orgSelect.value;
@@ -131,7 +126,6 @@
             // "Аймаг УЦУОШТ" автоматаар үүсгэх логик
             const autoOrgName = (p.aimag && p.aimag !== "Тодорхойгүй") ? `${p.aimag} УЦУОШТ` : "Тодорхойгүй";
             
-            // Байгууллагын шүүлтүүрт ЦУОШГ, БОХЗТЛ, НЦУТ-ийг тооцох
             const matchAimag = (selAimag === "Бүгд" || p.aimag === selAimag);
             const matchOrg = (selOrg === "Бүгд" || p.org === selOrg || autoOrgName === selOrg);
             const matchQuery = (!q || p.name.toLowerCase().includes(q));
@@ -142,8 +136,7 @@
                     radius: 8, color: "#fff", weight: 1, fillColor: color, fillOpacity: 0.9
                 });
                 
-                // Поп-ап дотор байгууллагын нэрийг зөв харуулах
-                const displayOrg = (p.org !== "Тодорхойгүй") ? p.org : autoOrgName;
+                const displayOrg = (p.org && p.org !== "Тодорхойгүй") ? p.org : autoOrgName;
                 m.bindPopup(`
                     <div style="min-width:160px;">
                         <b style="font-size:14px; color:#2c3e50;">${p.name}</b><br>
@@ -157,19 +150,18 @@
                 count++;
             }
         });
-
         stat.innerHTML = `Харагдаж буй: ${count} / ${points.length}`;
     }
 
-    // 6. Аймаг сонгоход Байгууллага автоматаар нэрлэгдэх логик
+    // 5. ШИНЭ: Аймаг сонгоход Байгууллагыг автоматаар шүүх логик
     aimagSelect.onchange = function() {
         const selectedAimag = this.value;
-        
         if (selectedAimag !== "Бүгд") {
             const generatedOrg = `${selectedAimag} УЦУОШТ`;
             
-            // Хэрэв жагсаалтад тухайн УЦУОШТ байхгүй бол нэмэх
-            if (![...orgSelect.options].some(opt => opt.value === generatedOrg)) {
+            // Хэрэв жагсаалтад тухайн УЦУОШТ байхгүй бол түр нэмэх (сонгох боломжтой болгох)
+            let exists = Array.from(orgSelect.options).some(opt => opt.value === generatedOrg);
+            if (!exists) {
                 const newOpt = new Option(generatedOrg, generatedOrg);
                 orgSelect.add(newOpt);
             }
@@ -182,7 +174,35 @@
 
     orgSelect.onchange = render;
     nameSearch.oninput = render;
-    render();
+
+    // 6. URL-аас ирсэн параметрээр ажиллах (Zoom 12)
+    window.onload = function() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const targetName = urlParams.get('name');
+
+        if (targetName) {
+            nameSearch.value = targetName;
+            render(); 
+
+            const targetPoint = points.find(p => p.name.toLowerCase() === targetName.toLowerCase());
+            if (targetPoint) {
+                map.setView([targetPoint.lat, targetPoint.lon], 12); 
+                
+                // Маркерийг хайж олоод поп-ап нээх
+                setTimeout(() => {
+                    renderLayer.eachLayer(layer => {
+                        if (layer.getLatLng && 
+                            layer.getLatLng().lat === targetPoint.lat && 
+                            layer.getLatLng().lng === targetPoint.lon) {
+                            layer.openPopup();
+                        }
+                    });
+                }, 300); // Давхаргыг бүрэн ачаалагдахыг хүлээх
+            }
+        } else {
+            render(); // Параметр байхгүй бол шууд зурах
+        }
+    };
 </script>
 
 </body>

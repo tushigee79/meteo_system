@@ -1,79 +1,99 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from django.urls import path, reverse
-from .models import Aimag, Soum, Location, Device, Maintenance, Calibration, UserProfile, Organization
+from django.utils import timezone
+from django.urls import path
+from .models import *
 from .views import device_import_csv
 
-# 1. Байгууллагын админ
-@admin.register(Organization)
-class OrganizationAdmin(admin.ModelAdmin):
-    list_display = ("name", "code", "created_at")
-    search_fields = ("name", "code")
+# A. Суурь эрхийн класс
+class BaseAimagAdmin(admin.ModelAdmin):
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser: 
+            return qs
+        return qs.filter(location__aimag_ref=request.user.userprofile.aimag)
 
-# 2. Аймаг, Сумын админ
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+class DeviceAttachmentInline(admin.TabularInline):
+    model = DeviceAttachment
+    extra = 1
+
 @admin.register(Aimag)
 class AimagAdmin(admin.ModelAdmin):
-    list_display = ("name", "created_at")
-    search_fields = ("name",)
+    search_fields = ("name",) # Autocomplete-д заавал хэрэгтэй
 
-@admin.register(Soum)
-class SoumAdmin(admin.ModelAdmin):
-    list_display = ("name", "aimag", "created_at")
+@admin.register(SumDuureg)
+class SumDuuregAdmin(admin.ModelAdmin):
+    list_display = ("name", "aimag")
     list_filter = ("aimag",)
-    search_fields = ("name",)
+    search_fields = ("name",) # Autocomplete-д заавал хэрэгтэй
 
-# 3. Байршил (Location) админ
 @admin.register(Location)
-class LocationAdmin(admin.ModelAdmin):
-    # 'owner_org'-ыг 'display_owner_org' функцээр сольсон
-    list_display = ("name", "location_type", "aimag_ref", "display_owner_org", "view_on_map")
-    list_filter = ("location_type", "aimag_ref", "owner_org")
-    search_fields = ("name", "wmo_index")
+class LocationAdmin(BaseAimagAdmin):
+    # 'get_full_location' нэгтгэсэн баганыг 'sum_ref'-ийн оронд нэмэв
+    list_display = ("name", "location_type", "aimag_ref", "get_full_location", "display_owner", "view_on_map")
+    list_filter = ("location_type", "aimag_ref")
+    search_fields = ("name",)
+    autocomplete_fields = ['aimag_ref', 'sum_ref'] 
     
-    def display_owner_org(self, obj):
-        """Байгууллагыг автоматаар нэрлэх логик"""
-        if obj.owner_org:
-            return obj.owner_org.name
-        if obj.aimag_ref:
-            # Аймаг сонгогдсон бол автоматаар 'УЦУОШТ' залгана
-            return f"{obj.aimag_ref.name} УЦУОШТ"
+    # Динамик шүүлтүүр (Aimag -> Sum & Org) JavaScript холболт
+    class Media:
+        js = (
+            'https://code.jquery.com/jquery-3.6.0.min.js', 
+            'inventory/js/location_chained.js', 
+        )
+
+    # Станцын нэрийг Сумтай нь давхар оруулж харуулах логик
+    def get_full_location(self, obj):
+        if obj.sum_ref:
+            return f"{obj.aimag_ref.name} - {obj.sum_ref.name}"
         return "-"
-    display_owner_org.short_description = "Эзэмшигч байгууллага"
-    
+    get_full_location.short_description = "Сум/Дүүрэг"
+
+    def display_owner(self, obj):
+        if obj.owner_org: 
+            return obj.owner_org.name
+        return f"{obj.aimag_ref.name} УЦУОШТ" if obj.aimag_ref else "-"
+    display_owner.short_description = "Эзэмшигч байгууллага"
+
     def view_on_map(self, obj):
         if obj.latitude and obj.longitude:
-            url = reverse('inventory:location_map') + f"?name={obj.name}"
+            url = f"/inventory/map/?name={obj.name}"
             return format_html('<a href="{}" target="_blank" style="text-decoration:none;">📍 Харах</a>', url)
         return "Координатгүй"
     view_on_map.short_description = "Газрын зураг"
 
-# 4. Багаж хэрэгсэл (Device) админ
 @admin.register(Device)
-class DeviceAdmin(admin.ModelAdmin):
-    list_display = ("name", "serial_number", "status", "last_calibration_date")
-    list_filter = ("status", "location__aimag_ref")
-    search_fields = ("name", "serial_number")
+class DeviceAdmin(BaseAimagAdmin):
+    list_display = ("get_name", "serial_number", "get_device_owner", "calibration_status")
+    inlines = [DeviceAttachmentInline]
 
     def get_urls(self):
         urls = super().get_urls()
-        custom_urls = [
-            path('import-csv/', self.admin_site.admin_view(device_import_csv), name='inventory_device_import_csv'),
-        ]
-        return custom_urls + urls
+        return [path('import-csv/', self.admin_site.admin_view(device_import_csv), name='inventory_device_import_csv')] + urls
 
-# 5. Засвар үйлчилгээ ба Баталгаажуулалт
-@admin.register(Maintenance)
-class MaintenanceAdmin(admin.ModelAdmin):
-    list_display = ("device", "maintenance_type", "date", "performed_by")
-    list_filter = ("maintenance_type", "date")
+    def get_name(self, obj): return str(obj)
+    
+    def get_device_owner(self, obj):
+        if not obj.location: return "-"
+        if obj.location.owner_org: 
+            return obj.location.owner_org.name
+        return f"{obj.location.aimag_ref.name} УЦУОШТ" if obj.location.aimag_ref else "-"
+    get_device_owner.short_description = "Эзэмшигч байгууллага"
 
-@admin.register(Calibration)
-class CalibrationAdmin(admin.ModelAdmin):
-    list_display = ("device", "calibration_date", "expiry_date", "is_valid")
-    list_filter = ("calibration_date", "is_valid")
+    def calibration_status(self, obj):
+        if not obj.valid_until: 
+            return format_html('<span style="color:gray;">Мэдээлэлгүй</span>')
+        diff = (obj.valid_until - timezone.now().date()).days
+        color = "red" if diff <= 0 else "orange" if diff <= 30 else "blue" if diff <= 90 else "green"
+        text = f"Хэтэрсэн ({abs(diff)} х)" if diff <= 0 else f"Шар ({diff} х)" if diff <= 30 else f"Цэнхэр ({diff} х)" if diff <= 90 else "Хэвийн"
+        return format_html('<b style="color: {};">{}</b>', color, text)
 
-# 6. Хэрэглэгчийн профиль
-@admin.register(UserProfile)
-class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "aimag", "role")
-    list_filter = ("role", "aimag")
+@admin.register(SparePartOrder)
+class SparePartOrderAdmin(admin.ModelAdmin):
+    list_display = ("id", "aimag", "status", "created_at")
+    list_filter = ("status", "aimag")
+
+admin.site.register([Organization, MasterDevice, UserProfile])

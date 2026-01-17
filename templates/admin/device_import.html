@@ -1,43 +1,27 @@
 {% extends "admin/base_site.html" %}
-{% load i18n %}
-
 {% block content %}
-  <div class="content">
-    <h1>{{ title }}</h1>
-
-    <p style="margin-top: 8px;">
-      CSV багана (жишиг): <code>aimag, station_nam, index, lat, lon, hhh</code><br>
-      Олон CSV-г нэг дор сонгоод импортолж болно.
-    </p>
-
-    <form method="post" enctype="multipart/form-data" style="margin-top: 16px;">
+<div class="card card-primary card-outline" style="max-width: 600px; margin: 20px auto;">
+  <div class="card-header"><b>Станц/Харуул импортлох</b></div>
+  <div class="card-body">
+    <form method="post" enctype="multipart/form-data">
       {% csrf_token %}
-
-      <fieldset class="module aligned">
-        <div class="form-row">
-          <label for="id_station_type"><strong>Станцын төрөл</strong></label>
-          <select name="station_type" id="id_station_type">
-            <option value="AWS">Автомат станц (AWS)</option>
-            <option value="METEO" selected>Цаг уурын станц/цэг</option>
-            <option value="HYDRO">Ус судлалын харуул/цэг</option>
-            <option value="AERO">Аэрологи</option>
-            <option value="LAB">Лаборатори</option>
-            <option value="OTHER">Бусад</option>
-          </select>
-          <p class="help">Файлын нэрэнд <code>us_sudlal</code> эсвэл <code>haruul</code> орсон бол автоматаар HYDRO болно.</p>
-        </div>
-
-        <div class="form-row">
-          <label for="id_csv_files"><strong>CSV файлууд</strong></label>
-          <input type="file" name="csv_files" id="id_csv_files" multiple accept=".csv">
-          <p class="help">Жишээ: <code>sid.csv</code>, <code>Book1_as_sid.csv</code>, <code>sid_us_sudlal_haruul.csv</code></p>
-        </div>
-      </fieldset>
-
-      <div class="submit-row">
-        <input type="submit" value="Импортлох" class="default">
-        <a class="button cancel-link" href="{% url 'admin:index' %}">Буцах</a>
+      <div class="form-group">
+        <label>Станцын төрөл сонгох:</label>
+        <select name="station_type" class="form-control" required>
+          <option value="METEO">Цаг уурын станц (METEO)</option>
+          <option value="HYDRO">Ус судлалын харуул (HYDRO)</option>
+          <option value="AWS">Автомат станц (AWS)</option>
+        </select>
+      </div>
+      <div class="form-group mt-3">
+        <label>CSV Файл:</label>
+        <input type="file" name="csv_file" class="form-control" accept=".csv" required>
+      </div>
+      <div class="mt-4">
+        <button class="btn btn-success" type="submit">📥 Импорт хийх</button>
+        <a class="btn btn-default" href="..">Буцах</a>
       </div>
     </form>
   </div>
+</div>
 {% endblock %}
