@@ -1,17 +1,14 @@
 from django.contrib import admin
-from django.urls import path, include
-from django.views.generic import RedirectView
-from django.conf import settings
-from django.contrib import admin # Стандарт admin-ийг импортлох
 from django.urls import path
-from django.contrib.staticfiles.urls import staticfiles_urlpatterns
+from django.conf import settings
+from django.conf.urls.static import static # Энэ мөр дутуу байсан тул нэмэв
 
 urlpatterns = [
-    path('admin/', admin.site.urls), # Энд admin.site.urls гэж шууд бичнэ
+    path('admin/', admin.site.urls), #
     path('', admin.site.urls),
 ]
 
+# Хөгжүүлэлтийн үед статик болон медиа файлуудыг харуулах
 if settings.DEBUG:
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-
-urlpatterns += staticfiles_urlpatterns()
