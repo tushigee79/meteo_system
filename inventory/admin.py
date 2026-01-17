@@ -5,12 +5,14 @@ from django.urls import path
 from .models import *
 from .views import device_import_csv
 
-# A. Суурь эрхийн класс
+# A. Суурь эрхийн класс - ЦУОШГ (NAMEM_HQ) болон БОХЗТЛ (LAB_RIC)-ийн эрхийг нэмэв
 class BaseAimagAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        if request.user.is_superuser: 
+        # 1. Superuser, ЦУОШГ мэргэжилтэн болон БОХЗТЛ инженер бүх өгөгдлийг харна
+        if request.user.is_superuser or request.user.userprofile.role in ['NAMEM_HQ', 'LAB_RIC']:
             return qs
+        # 2. Орон нутгийн инженер зөвхөн өөрийн аймгийг харна
         return qs.filter(location__aimag_ref=request.user.userprofile.aimag)
 
     def has_delete_permission(self, request, obj=None):
@@ -20,32 +22,35 @@ class DeviceAttachmentInline(admin.TabularInline):
     model = DeviceAttachment
     extra = 1
 
+# БОХЗТЛ: Баталгаажуулалтын түүх (RIC жишгээр)
+class CalibrationRecordInline(admin.TabularInline):
+    model = CalibrationRecord
+    extra = 1
+
 @admin.register(Aimag)
 class AimagAdmin(admin.ModelAdmin):
-    search_fields = ("name",) # Autocomplete-д заавал хэрэгтэй
+    search_fields = ("name",)
 
 @admin.register(SumDuureg)
 class SumDuuregAdmin(admin.ModelAdmin):
     list_display = ("name", "aimag")
     list_filter = ("aimag",)
-    search_fields = ("name",) # Autocomplete-д заавал хэрэгтэй
+    search_fields = ("name",)
 
 @admin.register(Location)
 class LocationAdmin(BaseAimagAdmin):
-    # 'get_full_location' нэгтгэсэн баганыг 'sum_ref'-ийн оронд нэмэв
-    list_display = ("name", "location_type", "aimag_ref", "get_full_location", "display_owner", "view_on_map")
+    # 'wmo_index' талбарыг ЦУОШГ-ын хэрэгцээнд зориулж нэмэв
+    list_display = ("name", "wmo_index", "location_type", "aimag_ref", "get_full_location", "display_owner", "view_on_map")
     list_filter = ("location_type", "aimag_ref")
-    search_fields = ("name",)
+    search_fields = ("name", "wmo_index")
     autocomplete_fields = ['aimag_ref', 'sum_ref'] 
     
-    # Динамик шүүлтүүр (Aimag -> Sum & Org) JavaScript холболт
     class Media:
         js = (
             'https://code.jquery.com/jquery-3.6.0.min.js', 
             'inventory/js/location_chained.js', 
         )
 
-    # Станцын нэрийг Сумтай нь давхар оруулж харуулах логик
     def get_full_location(self, obj):
         if obj.sum_ref:
             return f"{obj.aimag_ref.name} - {obj.sum_ref.name}"
@@ -68,7 +73,8 @@ class LocationAdmin(BaseAimagAdmin):
 @admin.register(Device)
 class DeviceAdmin(BaseAimagAdmin):
     list_display = ("get_name", "serial_number", "get_device_owner", "calibration_status")
-    inlines = [DeviceAttachmentInline]
+    # БОХЗТЛ-ийн баталгаажуулалтын түүхийг нэмэв
+    inlines = [DeviceAttachmentInline, CalibrationRecordInline]
 
     def get_urls(self):
         urls = super().get_urls()
@@ -87,9 +93,19 @@ class DeviceAdmin(BaseAimagAdmin):
         if not obj.valid_until: 
             return format_html('<span style="color:gray;">Мэдээлэлгүй</span>')
         diff = (obj.valid_until - timezone.now().date()).days
-        color = "red" if diff <= 0 else "orange" if diff <= 30 else "blue" if diff <= 90 else "green"
-        text = f"Хэтэрсэн ({abs(diff)} х)" if diff <= 0 else f"Шар ({diff} х)" if diff <= 30 else f"Цэнхэр ({diff} х)" if diff <= 90 else "Хэвийн"
+        # БОХЗТЛ-ийн хяналтын өнгөний логик (WMO жишиг)
+        color = "red" if diff <= 0 else "orange" if diff <= 60 else "green"
+        text = f"Хэтэрсэн ({abs(diff)} х)" if diff <= 0 else f"Дуусах дөхсөн ({diff} х)" if diff <= 60 else "Хэвийн"
         return format_html('<b style="color: {};">{}</b>', color, text)
+
+# БОХЗТЛ-ийн эталон багаж болон баталгаажуулалтын бүртгэл
+@admin.register(StandardInstrument)
+class StandardInstrumentAdmin(admin.ModelAdmin):
+    list_display = ("name", "serial_number", "accuracy_class", "last_calibration")
+
+@admin.register(CalibrationRecord)
+class CalibrationRecordAdmin(admin.ModelAdmin):
+    list_display = ("device", "certificate_no", "issue_date", "expiry_date")
 
 @admin.register(SparePartOrder)
 class SparePartOrderAdmin(admin.ModelAdmin):
