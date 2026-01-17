@@ -10,4 +10,8 @@ urlpatterns = [
     
     # 2. Газрын зураг
     path("map/", views.location_map, name="location_map"),
+
+    # 3. Улсын сүлжээний багаж, хэмжих хэрэгслийн бэлэн байдлын график тайлан (Dashboard)
+    # views.national_dashboard функцийг 'dashboard/' хаягтай холбов
+    path('dashboard/', views.national_dashboard, name='national_dashboard'),
 ]

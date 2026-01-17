@@ -3,9 +3,13 @@ from django.utils.html import format_html
 from django.utils import timezone
 from django.urls import path
 from .models import *
-from .views import device_import_csv
+from .views import device_import_csv, national_dashboard
 
-# A. Суурь эрхийн класс - ЦУОШГ болон БОХЗТЛ-ийн хяналтыг нэгтгэв
+# 1. Админ панелийн үндсэн нүүрийг Dashboard-оор солих
+# Энэ хэсэг нь удирдлага нэвтэрмэгц график харах боломжийг олгоно
+admin.site.index = national_dashboard
+
+# A. Суурь эрхийн класс
 class BaseAimagAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -23,7 +27,6 @@ class BaseAimagAdmin(admin.ModelAdmin):
         return request.user.is_superuser
 
 # --- Inline бүртгэлүүд ---
-
 class DeviceAttachmentInline(admin.TabularInline):
     model = DeviceAttachment
     extra = 1
@@ -58,21 +61,16 @@ class LocationAdmin(BaseAimagAdmin):
     autocomplete_fields = ['aimag_ref', 'sum_ref'] 
     
     class Media:
-        js = (
-            'https://code.jquery.com/jquery-3.6.0.min.js', 
-            'inventory/js/location_chained.js', 
-        )
+        js = ('https://code.jquery.com/jquery-3.6.0.min.js', 'inventory/js/location_chained.js')
 
     def get_full_location(self, obj):
-        # "Аймаг - Сум" хэлбэрээр харуулна
         if obj.sum_ref:
             return f"{obj.aimag_ref.name} - {obj.sum_ref.name}"
         return f"{obj.aimag_ref.name} - Сум тодорхойгүй"
     get_full_location.short_description = "Сум/Дүүрэг"
 
     def display_owner(self, obj):
-        if obj.owner_org: 
-            return obj.owner_org.name
+        if obj.owner_org: return obj.owner_org.name
         return f"{obj.aimag_ref.name} УЦУОШТ" if obj.aimag_ref else "-"
     display_owner.short_description = "Эзэмшигч байгууллага"
 
@@ -85,7 +83,6 @@ class LocationAdmin(BaseAimagAdmin):
 
 @admin.register(Device)
 class DeviceAdmin(BaseAimagAdmin):
-    # Fieldsets ашиглан "Бусад" талбарыг тод харуулж, бүтцийг зохион байгуулав
     fieldsets = (
         ('Үндсэн мэдээлэл', {
             'fields': ('master_device', 'other_device_name', 'serial_number', 'device_type', 'location', 'status')
@@ -100,7 +97,6 @@ class DeviceAdmin(BaseAimagAdmin):
     inlines = [DeviceAttachmentInline, CalibrationRecordInline, DeviceFaultInline]
 
     def display_device_name(self, obj):
-        # Хэрэв гараар нэр оруулсан бол цэнхэр курсивээр харуулна
         if obj.other_device_name:
             return format_html('<i style="color: blue;">{} (Бусад)</i>', obj.other_device_name)
         return str(obj.master_device)
@@ -131,7 +127,6 @@ class DeviceAdmin(BaseAimagAdmin):
 
 @admin.register(StandardInstrument)
 class StandardInstrumentAdmin(admin.ModelAdmin):
-    # "Бусад" талбарыг жагсаалт болон засварлах цонхонд нэмэв
     list_display = ("name", "other_standard_name", "serial_number", "accuracy_class", "last_calibration")
     fields = ("name", "other_standard_name", "serial_number", "accuracy_class", "last_calibration")
     search_fields = ("name", "other_standard_name", "serial_number")
