@@ -1,221 +1,123 @@
 <!DOCTYPE html>
 <html lang="mn">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Байршлын газрын зураг</title>
-
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-  <style>
-    body { margin: 0; font-family: Arial, sans-serif; background:#fff; }
-    .hdr { padding: 10px 14px; font-weight: 700; border-bottom:1px solid #eee; }
-    #map { height: calc(100vh - 44px); width: 100%; }
-
-    .ctrl {
-      background: white;
-      padding: 10px 10px 8px 10px;
-      border-radius: 8px;
-      box-shadow: 0 0 10px rgba(0,0,0,.25);
-      font-size: 12px;
-      line-height: 1.4;
-      min-width: 240px;
-    }
-    .ctrl label { display:block; font-weight: 700; margin: 0 0 4px 0; }
-    .ctrl select, .ctrl input {
-      width: 100%;
-      box-sizing: border-box;
-      padding: 7px 8px;
-      margin: 0 0 8px 0;
-      border: 1px solid #ddd;
-      border-radius: 7px;
-      outline: none;
-    }
-    .ctrl small { color:#666; }
-
-    .legend {
-      background: white;
-      padding: 8px 10px;
-      font-size: 12px;
-      line-height: 1.4;
-      border-radius: 8px;
-      box-shadow: 0 0 10px rgba(0,0,0,.25);
-    }
-    .dot {
-      display:inline-block;
-      width:10px;height:10px;border-radius:50%;
-      margin-right:6px; vertical-align: middle;
-    }
-
-    /* AWS icon */
-    .awsIcon {
-      font-size: 16px;
-      line-height: 16px;
-      transform: translate(-2px, -2px);
-      text-shadow: 0 0 2px rgba(0,0,0,.35);
-    }
-  </style>
+    <meta charset="utf-8" />
+    <title>Байршлын газрын зураг</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body { margin: 0; font-family: Arial, sans-serif; }
+        #map { height: 100vh; width: 100%; }
+        .ctrl { background: white; padding: 12px; border-radius: 8px; box-shadow: 0 0 15px rgba(0,0,0,0.2); min-width: 200px; }
+        .ctrl label { display:block; font-weight: bold; margin-top: 8px; }
+        .ctrl select, .ctrl input { width: 100%; padding: 6px; margin-top: 4px; }
+        .legend { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 0 15px rgba(0,0,0,0.2); line-height: 24px; }
+        .legend-item { cursor: pointer; display: flex; align-items: center; }
+        .legend-item.inactive { opacity: 0.3; text-decoration: line-through; }
+        .dot { height: 12px; width: 12px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+    </style>
 </head>
 <body>
 
-<div class="hdr">Байршлын газрын зураг</div>
 <div id="map"></div>
 
-{# ✅ Safe JSON injection #}
-{{ locations_json|json_script:"locations-data" }}
+<script id="locations-data" type="application/json">{{ locations_json|safe }}</script>
 
 <script>
-  const map = L.map("map").setView([47.9, 103.0], 6);
+    function normStr(s) { return (s || "").toString().toLowerCase().trim(); }
+    
+    const map = L.map("map").setView([46.8625, 103.8467], 5);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18 })
-    .addTo(map);
+    const points = JSON.parse(document.getElementById("locations-data").textContent);
+    const renderLayer = L.layerGroup().addTo(map);
+    
+    let activeTypes = { "METEO": true, "HYDRO": true, "AWS": true };
+    const typeColors = { "METEO": "#1f77b4", "HYDRO": "#2ca02c", "AWS": "#ff7f0e" };
 
-  const points = JSON.parse(document.getElementById("locations-data").textContent || "[]");
+    // 1. Зүүн дээд шүүлтүүр
+    const filterCtrl = L.control({position: "topleft"});
+    filterCtrl.onAdd = function() {
+        const div = L.DomUtil.create("div", "ctrl");
+        div.innerHTML = `
+            <label>Аймаг</label><select id="aimagFilter"><option value="Бүгд">Бүгд</option></select>
+            <label>Байгууллага</label><select id="orgFilter"><option value="Бүгд">Бүгд</option></select>
+            <label>Хайх</label><input id="nameSearch" placeholder="Станцын нэр..." />
+            <div id="stat" style="margin-top:10px; font-size:12px;"></div>
+        `;
+        return div;
+    };
+    filterCtrl.addTo(map);
 
-  function colorByType(t){
-    if (t === "METEO") return "#1f77b4";
-    if (t === "HYDRO") return "#2ca02c";
-    if (t === "AWS")   return "#ff7f0e";
-    return "#999999";
-  }
+    // 2. Баруун доод идэвхтэй Legend
+    const legend = L.control({position: "bottomright"});
+    legend.onAdd = function() {
+        const div = L.DomUtil.create("div", "legend");
+        div.innerHTML = `<b>Төрлөөр шүүх:</b><br>`;
+        Object.keys(typeColors).forEach(type => {
+            const item = L.DomUtil.create("div", "legend-item", div);
+            item.innerHTML = `<span class="dot" style="background:${typeColors[type]}"></span>${type}`;
+            item.onclick = function() {
+                activeTypes[type] = !activeTypes[type];
+                this.classList.toggle("inactive");
+                render();
+            };
+        });
+        return div;
+    };
+    legend.addTo(map);
 
-  function radiusByDeviceCount(n){
-    const x = Number(n ?? 0);
-    // 4..16 орчим, лог өсөлт
-    return 4 + Math.min(12, Math.log10(1 + Math.max(0, x)) * 6);
-  }
+    const aimagSelect = document.getElementById("aimagFilter");
+    const orgSelect = document.getElementById("orgFilter");
+    const nameSearch = document.getElementById("nameSearch");
 
-  function normStr(s){
-    return String(s ?? "").toLowerCase().trim();
-  }
+    // Сонголтуудыг бөглөх
+    const aimags = [...new Set(points.map(p => p.aimag))].sort();
+    aimags.forEach(a => aimagSelect.innerHTML += `<option value="${a}">${a}</option>`);
+    
+    const orgs = [...new Set(points.map(p => p.org))].sort();
+    orgs.forEach(o => orgSelect.innerHTML += `<option value="${o}">${o}</option>`);
 
-  // --- Build aimag list ---
-  const aimags = new Set();
-  for (const p of points) aimags.add(p.aimag || "Тодорхойгүй");
-  const aimagList = ["Бүгд", ...Array.from(aimags).sort((a,b)=>a.localeCompare(b))];
-
-  // --- Controls ---
-  const ctrl = L.control({position: "topleft"});
-  ctrl.onAdd = function(){
-    const div = L.DomUtil.create("div", "ctrl");
-    div.innerHTML = `
-      <label>Аймаг</label>
-      <select id="aimagFilter"></select>
-
-      <label>Хайлт (станцын нэр)</label>
-      <input id="nameSearch" placeholder="Ж: Тариат" />
-
-      <div id="stat"><small>Ачаалж байна...</small></div>
-    `;
-    return div;
-  };
-  ctrl.addTo(map);
-
-  const ctrlEl = document.querySelector(".ctrl");
-  L.DomEvent.disableClickPropagation(ctrlEl);
-  L.DomEvent.disableScrollPropagation(ctrlEl);
-
-  const aimagSelect = document.getElementById("aimagFilter");
-  const nameSearch = document.getElementById("nameSearch");
-  const stat = document.getElementById("stat");
-
-  for (const a of aimagList) {
-    const opt = document.createElement("option");
-    opt.value = a;
-    opt.textContent = a;
-    aimagSelect.appendChild(opt);
-  }
-
-  const renderLayer = L.layerGroup().addTo(map);
-
-  const awsDivIcon = L.divIcon({
-    className: "awsIcon",
-    html: "🟠",
-    iconSize: [16,16]
-  });
-
-  function makeMarker(p){
-    const lat = Number(p.lat);
-    const lon = Number(p.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-
-    const type = p.type || "UNKNOWN";
-    const color = colorByType(type);
-    const devCount = Number(p.device_count ?? 0);
-    const aimag = p.aimag || "Тодорхойгүй";
-
-    let marker;
-    if (type === "AWS") {
-      marker = L.marker([lat, lon], { icon: awsDivIcon });
-    } else {
-      marker = L.circleMarker([lat, lon], {
-        radius: radiusByDeviceCount(devCount),
-        color: color,
-        weight: 2,
-        fillColor: color,
-        fillOpacity: 0.85
-      });
+    function createMarker(p) {
+        const marker = L.circleMarker([p.lat, p.lon], {
+            radius: 8, color: "#fff", weight: 1, fillColor: typeColors[p.type], fillOpacity: 0.9
+        });
+        marker.bindPopup(`<b>${p.name}</b><br>Байгууллага: ${p.org}<br>📊 Багаж: ${p.device_count} ш`);
+        marker.__data = p;
+        return marker;
     }
 
-    const status = p.status ?? "";
-    marker.bindPopup(
-      `<b>${p.name ?? ""}</b>
-       <br>Аймаг: ${aimag}
-       <br>Төрөл: ${type}
-       <br>Төлөв: ${status}
-       <br><b>Багажийн тоо:</b> ${devCount}`
-    );
+    const markers = points.map(p => createMarker(p));
 
-    marker.__data = { aimag, name: (p.name ?? "") };
-    return marker;
-  }
+    function render() {
+        const a = aimagSelect.value;
+        const o = orgSelect.value;
+        const q = normStr(nameSearch.value);
+        const urlParams = new URLSearchParams(window.location.search);
+        const target = normStr(urlParams.get('name'));
 
-  const markers = [];
-  for (const p of points) {
-    const m = makeMarker(p);
-    if (m) markers.push(m);
-  }
+        renderLayer.clearLayers();
+        let count = 0;
 
-  function render(){
-    const selectedAimag = aimagSelect.value;
-    const q = normStr(nameSearch.value);
+        markers.forEach(m => {
+            const d = m.__data;
+            const isTarget = target && normStr(d.name) === target;
+            const match = (a === "Бүгд" || d.aimag === a) && 
+                          (o === "Бүгд" || d.org === o) && 
+                          (!q || normStr(d.name).includes(q));
 
-    renderLayer.clearLayers();
-
-    let shown = 0;
-    for (const m of markers) {
-      const d = m.__data;
-
-      if (selectedAimag !== "Бүгд" && d.aimag !== selectedAimag) continue;
-      if (q && !normStr(d.name).includes(q)) continue;
-
-      renderLayer.addLayer(m);
-      shown++;
+            if (isTarget || (activeTypes[d.type] && match)) {
+                renderLayer.addLayer(m);
+                count++;
+                if (isTarget) { map.setView(m.getLatLng(), 12); m.openPopup(); }
+            }
+        });
+        document.getElementById("stat").innerHTML = `Нийт: ${count}`;
     }
 
-    stat.innerHTML = `<b>Харагдаж буй цэг:</b> ${shown} / ${markers.length}`;
-  }
-
-  aimagSelect.addEventListener("change", render);
-  nameSearch.addEventListener("input", render);
-
-  render();
-
-  // --- Legend ---
-  const legend = L.control({position: "bottomright"});
-  legend.onAdd = function () {
-    const div = L.DomUtil.create("div", "legend");
-    div.innerHTML =
-      "<b>Тайлбар</b><br>" +
-      '<span class="dot" style="background:#1f77b4"></span> METEO<br>' +
-      '<span class="dot" style="background:#2ca02c"></span> HYDRO<br>' +
-      '<span style="display:inline-block;width:16px">🟠</span> AWS<br>' +
-      "<small>Том цэг = багаж их</small>";
-    return div;
-  };
-  legend.addTo(map);
+    [aimagSelect, orgSelect].forEach(el => el.onchange = render);
+    nameSearch.oninput = render;
+    render();
 </script>
-
 </body>
 </html>
