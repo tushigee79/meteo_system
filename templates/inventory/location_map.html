@@ -1,27 +1,189 @@
-// --- location_map.html доторх Сонголтуудыг бөглөх хэсгийг ингэж шинэчилнэ ---
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Байршлын газрын зураг</title>
 
-const aimagSelect = document.getElementById("aimagFilter");
-const orgSelect = document.getElementById("orgFilter");
-const nameSearch = document.getElementById("nameSearch");
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-// 1. Аймгуудын жагсаалтыг эрэмбэлж бөглөх
-const aimags = [...new Set(points.map(p => p.aimag))].sort((a, b) => a.localeCompare(b, 'mn'));
-aimags.forEach(a => {
-    if(a !== "Тодорхойгүй") aimagSelect.innerHTML += `<option value="${a}">${a}</option>`;
-});
+    <style>
+        body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background:#f4f7f6; }
+        .hdr { padding: 12px 18px; font-weight: 700; background: #2c3e50; color: white; display: flex; align-items: center; gap: 10px; }
+        #map { height: calc(100vh - 48px); width: 100%; }
 
-// 2. Байгууллагуудын жагсаалтыг эрэмбэлж бөглөх (Улаанбаатар + 21 аймаг + Төвүүд)
-const orgs = [...new Set(points.map(p => p.org))].filter(o => o && o !== "Тодорхойгүй");
-const sortedOrgs = orgs.sort((a, b) => a.localeCompare(b, 'mn'));
+        /* Шүүлтүүрийн удирдлага */
+        .ctrl {
+            background: white; padding: 15px; border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15); font-size: 13px; min-width: 240px;
+        }
+        .ctrl label { display:block; font-weight: 700; margin-bottom: 5px; color: #34495e; }
+        .ctrl select, .ctrl input { 
+            width: 100%; margin-bottom: 12px; padding: 8px; 
+            border: 1px solid #dcdde1; border-radius: 5px; box-sizing: border-box; 
+        }
 
-sortedOrgs.forEach(o => {
-    const opt = document.createElement("option");
-    opt.value = o;
-    opt.textContent = o;
-    orgSelect.appendChild(opt);
-});
+        /* Төрөл шүүх (Legend) хэсэг */
+        .legend {
+            background: white; padding: 12px; border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15); line-height: 26px; color: #2f3640;
+        }
+        .legend b { display: block; margin-bottom: 8px; border-bottom: 1px solid #f1f2f6; padding-bottom: 5px; }
+        .legend-item { 
+            cursor: pointer; padding: 4px 8px; border-radius: 5px; 
+            transition: all 0.2s; display: flex; align-items: center;
+        }
+        .legend-item:hover { background: #f1f2f6; }
+        .legend-item.inactive { opacity: 0.3; text-decoration: line-through; filter: grayscale(1); }
+        .dot { 
+            height: 12px; width: 12px; border-radius: 50%; 
+            display: inline-block; margin-right: 10px; border: 1px solid white;
+        }
+    </style>
+</head>
+<body>
 
-// Хэрэв байгууллага нь тодорхойгүй станц байвал жагсаалтын төгсгөлд нэмнэ
-if (points.some(p => p.org === "Тодорхойгүй")) {
-    orgSelect.innerHTML += `<option value="Тодорхойгүй">Тодорхойгүй</option>`;
-}
+<div class="hdr">📡 Станцуудын байршил (Байгууллагаар шүүх)</div>
+<div id="map"></div>
+
+<script id="locations-data" type="application/json">{{ locations_json|safe }}</script>
+
+<script>
+    // 1. Газрын зургийн суурь тохиргоо
+    const map = L.map("map").setView([46.8625, 103.8467], 5);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18 }).addTo(map);
+
+    let points = [];
+    try {
+        points = JSON.parse(document.getElementById("locations-data").textContent);
+    } catch (e) { console.error("Data error:", e); }
+
+    const renderLayer = L.layerGroup().addTo(map);
+    
+    // METEO, HYDRO, AWS шүүлтүүрүүдийг сэргээв
+    let activeTypes = { "METEO": true, "HYDRO": true, "AWS": true };
+    const typeColors = { "METEO": "#1f77b4", "HYDRO": "#2ca02c", "AWS": "#ff7f0e" };
+
+    // 2. Зүүн дээд талын шүүлтүүрийн удирдлага
+    const filterCtrl = L.control({position: "topleft"});
+    filterCtrl.onAdd = function() {
+        const div = L.DomUtil.create("div", "ctrl");
+        div.innerHTML = `
+            <label>Аймаг</label>
+            <select id="aimagFilter"><option value="Бүгд">Бүгд</option></select>
+            
+            <label>Байгууллага</label>
+            <select id="orgFilter">
+                <option value="Бүгд">Бүгд</option>
+                <option value="ЦУОШГ">ЦУОШГ</option>
+                <option value="БОХЗТЛ">БОХЗТЛ</option>
+                <option value="НЦУТ">НЦУТ</option>
+            </select>
+            
+            <label>Станцын нэр</label>
+            <input id="nameSearch" placeholder="Хайх..." />
+            <div id="stat" style="font-size:11px; color:#7f8c8d; font-weight:bold; margin-top:5px;"></div>
+        `;
+        return div;
+    };
+    filterCtrl.addTo(map);
+
+    // 3. Баруун доод талын төрөл шүүлтүүр (Legend)
+    const legend = L.control({position: "bottomright"});
+    legend.onAdd = function() {
+        const div = L.DomUtil.create("div", "legend");
+        div.innerHTML = `<b>Станцын төрөл:</b>`;
+        Object.keys(typeColors).forEach(type => {
+            const item = L.DomUtil.create("div", "legend-item", div);
+            item.innerHTML = `<span class="dot" style="background:${typeColors[type]}"></span>${type}`;
+            item.onclick = function() {
+                activeTypes[type] = !activeTypes[type];
+                this.classList.toggle("inactive");
+                render();
+            };
+        });
+        return div;
+    };
+    legend.addTo(map);
+
+    const aimagSelect = document.getElementById("aimagFilter");
+    const orgSelect = document.getElementById("orgFilter");
+    const nameSearch = document.getElementById("nameSearch");
+    const stat = document.getElementById("stat");
+
+    // 4. Аймгуудыг Монгол хэлээр эрэмбэлж бөглөх
+    const aimags = [...new Set(points.map(p => p.aimag))].sort((a, b) => a.localeCompare(b, 'mn'));
+    aimags.forEach(a => {
+        if(a !== "Тодорхойгүй") aimagSelect.innerHTML += `<option value="${a}">${a}</option>`;
+    });
+
+    // 5. Үндсэн Render функц (Шүүлтүүрийн логик)
+    function render() {
+        const selAimag = aimagSelect.value;
+        const selOrg = orgSelect.value;
+        const q = (nameSearch.value || "").toLowerCase().trim();
+
+        renderLayer.clearLayers();
+        let count = 0;
+
+        points.forEach(p => {
+            // "Аймаг УЦУОШТ" автоматаар үүсгэх логик
+            const autoOrgName = (p.aimag && p.aimag !== "Тодорхойгүй") ? `${p.aimag} УЦУОШТ` : "Тодорхойгүй";
+            
+            // Байгууллагын шүүлтүүрт ЦУОШГ, БОХЗТЛ, НЦУТ-ийг тооцох
+            const matchAimag = (selAimag === "Бүгд" || p.aimag === selAimag);
+            const matchOrg = (selOrg === "Бүгд" || p.org === selOrg || autoOrgName === selOrg);
+            const matchQuery = (!q || p.name.toLowerCase().includes(q));
+
+            if (activeTypes[p.type] && matchAimag && matchOrg && matchQuery) {
+                const color = typeColors[p.type] || "#999999";
+                const m = L.circleMarker([p.lat, p.lon], {
+                    radius: 8, color: "#fff", weight: 1, fillColor: color, fillOpacity: 0.9
+                });
+                
+                // Поп-ап дотор байгууллагын нэрийг зөв харуулах
+                const displayOrg = (p.org !== "Тодорхойгүй") ? p.org : autoOrgName;
+                m.bindPopup(`
+                    <div style="min-width:160px;">
+                        <b style="font-size:14px; color:#2c3e50;">${p.name}</b><br>
+                        <hr style="margin:5px 0; border:0; border-top:1px solid #eee;">
+                        <b>Байгууллага:</b> ${displayOrg}<br>
+                        <b>Аймаг:</b> ${p.aimag}<br>
+                        <b>📊 Багажийн тоо:</b> <span style="color:#e67e22; font-weight:bold;">${p.device_count || 0} ш</span>
+                    </div>
+                `);
+                renderLayer.addLayer(m);
+                count++;
+            }
+        });
+
+        stat.innerHTML = `Харагдаж буй: ${count} / ${points.length}`;
+    }
+
+    // 6. Аймаг сонгоход Байгууллага автоматаар нэрлэгдэх логик
+    aimagSelect.onchange = function() {
+        const selectedAimag = this.value;
+        
+        if (selectedAimag !== "Бүгд") {
+            const generatedOrg = `${selectedAimag} УЦУОШТ`;
+            
+            // Хэрэв жагсаалтад тухайн УЦУОШТ байхгүй бол нэмэх
+            if (![...orgSelect.options].some(opt => opt.value === generatedOrg)) {
+                const newOpt = new Option(generatedOrg, generatedOrg);
+                orgSelect.add(newOpt);
+            }
+            orgSelect.value = generatedOrg;
+        } else {
+            orgSelect.value = "Бүгд";
+        }
+        render();
+    };
+
+    orgSelect.onchange = render;
+    nameSearch.oninput = render;
+    render();
+</script>
+
+</body>
+</html>
