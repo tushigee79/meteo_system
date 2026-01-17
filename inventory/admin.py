@@ -1,87 +1,39 @@
-from django.contrib import admin
-from django.urls import path
-from django.shortcuts import redirect
+from django.urls import path # Импорт хэсэгт нэмээрэй
+from django.shortcuts import render # Импорт хэсэгт нэмээрэй
+from django import forms # Импорт хэсэгт нэмээрэй
 
-from .models import Location, Aimag, Soum, UserProfile, InternalMessage
+# CSV файл сонгох форм
+class CsvImportForm(forms.Form):
+    csv_file = forms.FileField()
 
+@admin.register(Device)
+class DeviceAdmin(AimagScopedAdminMixin, admin.ModelAdmin):
+    list_display = ("name", "serial_number", "get_location", "get_aimag")
+    list_filter = ("location__aimag_ref",)
+    search_fields = ("name", "serial_number")
+    
+    # CSV импортлох товчийг админ панелд нэмэх
+    change_list_template = "admin/inventory/device_changelist.html"
 
-class SoumByAimagFilter(admin.SimpleListFilter):
-    title = "Сум / Дүүрэг"
-    parameter_name = "soum_ref__id__exact"   # ✅ Location.soum_ref
+    def get_urls(self):
+        urls = super().get_urls()
+        my_urls = [
+            path('import-csv/', self.admin_site.admin_view(self.import_csv), name='inventory_device_import_csv'),
+        ]
+        return my_urls + urls
 
-    def lookups(self, request, model_admin):
-        aimag_id = request.GET.get("aimag_ref__id__exact")  # ✅ Location.aimag_ref
+    def import_csv(self, request):
+        if request.method == "POST":
+            # Энд CSV унших логик бичигдэнэ
+            pass
+        form = CsvImportForm()
+        payload = {"form": form}
+        return render(request, "admin/csv_form.html", payload)
 
-        qs = Soum.objects.all()
-        if aimag_id:
-            # ✅ Soum model дээр аймаг FK-ийн талбарын нэр ихэвчлэн "aimag"
-            qs = qs.filter(aimag_id=aimag_id)
+    @admin.display(description='Байршил')
+    def get_location(self, obj):
+        return obj.location.name if obj.location else "-"
 
-        return [(s.id, str(s)) for s in qs.order_by("name")]
-
-    def queryset(self, request, queryset):
-        val = self.value()
-        if val:
-            return queryset.filter(soum_ref_id=val)
-        return queryset
-
-
-@admin.register(Location)
-class LocationAdmin(admin.ModelAdmin):
-    list_display = ("name", "aimag_ref", "soum_ref", "location_type", "wmo_index")
-    list_filter = ("location_type", "aimag_ref", SoumByAimagFilter)
-    search_fields = ("name", "wmo_index", "wigos_id")
-
-
-@admin.register(Aimag)
-class AimagAdmin(admin.ModelAdmin):
-    search_fields = ("name",)
-
-
-@admin.register(Soum)
-class SoumAdmin(admin.ModelAdmin):
-    list_display = ("name", "aimag")
-    list_filter = ("aimag",)
-    search_fields = ("name", "aimag__name")
-
-
-@admin.register(UserProfile)
-class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "aimag", "is_engineer")
-    list_filter = ("is_engineer", "aimag")
-    search_fields = ("user__username", "user__first_name", "user__last_name")
-
-
-@admin.register(InternalMessage)
-class InternalMessageAdmin(admin.ModelAdmin):
-    list_display = ("sender", "receiver", "created_at", "is_read")
-    list_filter = ("is_read", "created_at")
-    search_fields = ("sender__username", "receiver__username", "message")
-
-
-# ============================
-# Admin branding
-# ============================
-admin.site.site_header = "БҮРТГЭЛ систем"
-admin.site.site_title = "БҮРТГЭЛ"
-admin.site.index_title = "Удирдлагын самбар"
-
-
-# ============================
-# Safe admin URL extension
-# ============================
-
-def map_view(request):
-    return redirect("/inventory/map/")
-
-
-_original_get_urls = admin.site.get_urls
-
-def get_urls():
-    urls = _original_get_urls()
-    custom = [
-        path("map/", admin.site.admin_view(map_view), name="inventory-map"),
-    ]
-    return custom + urls
-
-admin.site.get_urls = get_urls
+    @admin.display(description='Аймаг')
+    def get_aimag(self, obj):
+        return obj.location.aimag_ref.name if obj.location and obj.location.aimag_ref else "-"

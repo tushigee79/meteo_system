@@ -6,15 +6,13 @@ from django.shortcuts import redirect
 
 
 def root_redirect(request):
-    return redirect("/admin/")
+    return redirect('/admin/')
 
 
 urlpatterns = [
-    path("", root_redirect),              # ✅ /
-    path("admin/", admin.site.urls),
-
-    # smart_selects
-    path("chaining/", include("smart_selects.urls")),
+    path('', root_redirect),
+    path('admin/', admin.site.urls),
+    path('chaining/', include('smart_selects.urls')),
 ]
 
 if settings.DEBUG:
