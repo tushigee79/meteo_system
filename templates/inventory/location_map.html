@@ -1,123 +1,27 @@
-<!DOCTYPE html>
-<html lang="mn">
-<head>
-    <meta charset="utf-8" />
-    <title>Байршлын газрын зураг</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <style>
-        body { margin: 0; font-family: Arial, sans-serif; }
-        #map { height: 100vh; width: 100%; }
-        .ctrl { background: white; padding: 12px; border-radius: 8px; box-shadow: 0 0 15px rgba(0,0,0,0.2); min-width: 200px; }
-        .ctrl label { display:block; font-weight: bold; margin-top: 8px; }
-        .ctrl select, .ctrl input { width: 100%; padding: 6px; margin-top: 4px; }
-        .legend { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 0 15px rgba(0,0,0,0.2); line-height: 24px; }
-        .legend-item { cursor: pointer; display: flex; align-items: center; }
-        .legend-item.inactive { opacity: 0.3; text-decoration: line-through; }
-        .dot { height: 12px; width: 12px; border-radius: 50%; display: inline-block; margin-right: 8px; }
-    </style>
-</head>
-<body>
+// --- location_map.html доторх Сонголтуудыг бөглөх хэсгийг ингэж шинэчилнэ ---
 
-<div id="map"></div>
+const aimagSelect = document.getElementById("aimagFilter");
+const orgSelect = document.getElementById("orgFilter");
+const nameSearch = document.getElementById("nameSearch");
 
-<script id="locations-data" type="application/json">{{ locations_json|safe }}</script>
+// 1. Аймгуудын жагсаалтыг эрэмбэлж бөглөх
+const aimags = [...new Set(points.map(p => p.aimag))].sort((a, b) => a.localeCompare(b, 'mn'));
+aimags.forEach(a => {
+    if(a !== "Тодорхойгүй") aimagSelect.innerHTML += `<option value="${a}">${a}</option>`;
+});
 
-<script>
-    function normStr(s) { return (s || "").toString().toLowerCase().trim(); }
-    
-    const map = L.map("map").setView([46.8625, 103.8467], 5);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+// 2. Байгууллагуудын жагсаалтыг эрэмбэлж бөглөх (Улаанбаатар + 21 аймаг + Төвүүд)
+const orgs = [...new Set(points.map(p => p.org))].filter(o => o && o !== "Тодорхойгүй");
+const sortedOrgs = orgs.sort((a, b) => a.localeCompare(b, 'mn'));
 
-    const points = JSON.parse(document.getElementById("locations-data").textContent);
-    const renderLayer = L.layerGroup().addTo(map);
-    
-    let activeTypes = { "METEO": true, "HYDRO": true, "AWS": true };
-    const typeColors = { "METEO": "#1f77b4", "HYDRO": "#2ca02c", "AWS": "#ff7f0e" };
+sortedOrgs.forEach(o => {
+    const opt = document.createElement("option");
+    opt.value = o;
+    opt.textContent = o;
+    orgSelect.appendChild(opt);
+});
 
-    // 1. Зүүн дээд шүүлтүүр
-    const filterCtrl = L.control({position: "topleft"});
-    filterCtrl.onAdd = function() {
-        const div = L.DomUtil.create("div", "ctrl");
-        div.innerHTML = `
-            <label>Аймаг</label><select id="aimagFilter"><option value="Бүгд">Бүгд</option></select>
-            <label>Байгууллага</label><select id="orgFilter"><option value="Бүгд">Бүгд</option></select>
-            <label>Хайх</label><input id="nameSearch" placeholder="Станцын нэр..." />
-            <div id="stat" style="margin-top:10px; font-size:12px;"></div>
-        `;
-        return div;
-    };
-    filterCtrl.addTo(map);
-
-    // 2. Баруун доод идэвхтэй Legend
-    const legend = L.control({position: "bottomright"});
-    legend.onAdd = function() {
-        const div = L.DomUtil.create("div", "legend");
-        div.innerHTML = `<b>Төрлөөр шүүх:</b><br>`;
-        Object.keys(typeColors).forEach(type => {
-            const item = L.DomUtil.create("div", "legend-item", div);
-            item.innerHTML = `<span class="dot" style="background:${typeColors[type]}"></span>${type}`;
-            item.onclick = function() {
-                activeTypes[type] = !activeTypes[type];
-                this.classList.toggle("inactive");
-                render();
-            };
-        });
-        return div;
-    };
-    legend.addTo(map);
-
-    const aimagSelect = document.getElementById("aimagFilter");
-    const orgSelect = document.getElementById("orgFilter");
-    const nameSearch = document.getElementById("nameSearch");
-
-    // Сонголтуудыг бөглөх
-    const aimags = [...new Set(points.map(p => p.aimag))].sort();
-    aimags.forEach(a => aimagSelect.innerHTML += `<option value="${a}">${a}</option>`);
-    
-    const orgs = [...new Set(points.map(p => p.org))].sort();
-    orgs.forEach(o => orgSelect.innerHTML += `<option value="${o}">${o}</option>`);
-
-    function createMarker(p) {
-        const marker = L.circleMarker([p.lat, p.lon], {
-            radius: 8, color: "#fff", weight: 1, fillColor: typeColors[p.type], fillOpacity: 0.9
-        });
-        marker.bindPopup(`<b>${p.name}</b><br>Байгууллага: ${p.org}<br>📊 Багаж: ${p.device_count} ш`);
-        marker.__data = p;
-        return marker;
-    }
-
-    const markers = points.map(p => createMarker(p));
-
-    function render() {
-        const a = aimagSelect.value;
-        const o = orgSelect.value;
-        const q = normStr(nameSearch.value);
-        const urlParams = new URLSearchParams(window.location.search);
-        const target = normStr(urlParams.get('name'));
-
-        renderLayer.clearLayers();
-        let count = 0;
-
-        markers.forEach(m => {
-            const d = m.__data;
-            const isTarget = target && normStr(d.name) === target;
-            const match = (a === "Бүгд" || d.aimag === a) && 
-                          (o === "Бүгд" || d.org === o) && 
-                          (!q || normStr(d.name).includes(q));
-
-            if (isTarget || (activeTypes[d.type] && match)) {
-                renderLayer.addLayer(m);
-                count++;
-                if (isTarget) { map.setView(m.getLatLng(), 12); m.openPopup(); }
-            }
-        });
-        document.getElementById("stat").innerHTML = `Нийт: ${count}`;
-    }
-
-    [aimagSelect, orgSelect].forEach(el => el.onchange = render);
-    nameSearch.oninput = render;
-    render();
-</script>
-</body>
-</html>
+// Хэрэв байгууллага нь тодорхойгүй станц байвал жагсаалтын төгсгөлд нэмнэ
+if (points.some(p => p.org === "Тодорхойгүй")) {
+    orgSelect.innerHTML += `<option value="Тодорхойгүй">Тодорхойгүй</option>`;
+}

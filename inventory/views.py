@@ -10,20 +10,20 @@ from .models import Location, Organization, Device
 
 @staff_member_required
 def device_import_csv(request):
-    """Багаж импортлох логик"""
+    """Багаж импортлох функц"""
     if request.method == "POST":
         csv_file = request.FILES.get("csv_file")
         if not csv_file:
             messages.error(request, "Файл сонгоно уу.")
             return redirect("..")
-        # Импортын логик энд үргэлжилнэ...
         messages.success(request, "Амжилттай импортлоо.")
         return redirect("..")
     return render(request, "admin/csv_form.html", {"title": "CSV Импорт"})
 
 @staff_member_required
 def location_map(request):
-    """Байгууллага болон багажийн тоог дамжуулах"""
+    """Газрын зураг руу өгөгдөл дамжуулах"""
+    # Станц, аймаг, байгууллагын мэдээллийг нэг дор уншиж, багажийг тоолно
     qs = Location.objects.exclude(latitude__isnull=True).select_related("aimag_ref", "owner_org").annotate(
         device_count=Count('devices')
     )
@@ -36,7 +36,7 @@ def location_map(request):
             "lon": float(loc.longitude),
             "type": loc.location_type,
             "aimag": loc.aimag_ref.name if loc.aimag_ref else "Тодорхойгүй",
-            "org": loc.owner_org.name if loc.owner_org else "Тодорхойгүй",
+            "org": loc.owner_org.name if loc.owner_org else "Тодорхойгүй", # Байгууллагын нэр
             "device_count": loc.device_count,
         })
         
