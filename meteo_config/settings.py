@@ -32,7 +32,7 @@ ROOT_URLCONF = 'meteo_config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [os.path.join(BASE_DIR, 'templates')],
+        'DIRS': [BASE_DIR / 'templates'], # Энэ мөр байгаа эсэхийг заавал шалгана
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -44,7 +44,6 @@ TEMPLATES = [
         },
     },
 ]
-
 DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': BASE_DIR / 'db.sqlite3'}}
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
