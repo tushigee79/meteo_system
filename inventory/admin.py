@@ -1,150 +1,168 @@
+import json
+import datetime
 from django.contrib import admin
 from django.utils.html import format_html
+from django.urls import path, reverse
 from django.utils import timezone
-from django.urls import path
-from .models import *
-from .views import device_import_csv, national_dashboard
+from django.http import HttpResponse
+from django.template.loader import render_to_string
 
-# 1. Админ панелийн үндсэн нүүрийг Dashboard-оор солих
-# Энэ хэсэг нь удирдлага нэвтэрмэгц график харах боломжийг олгоно
+# PDF үүсгэх сан (pip install xhtml2pdf)
+from xhtml2pdf import pisa 
+
+# Моделиуд болон Харагдацуудыг импортлох
+from .models import (
+    Aimag, SumDuureg, Organization, Location, Device, 
+    MasterDevice, UserProfile, DeviceCategory, 
+    StandardInstrument, CalibrationRecord, DeviceFault, 
+    SparePartOrder, SparePartItem
+)
+from .views import (
+    device_import_csv, national_dashboard, download_aimag_template,
+    import_engineers_from_csv, download_retired_archive
+)
+
+# Админ панелийн нүүрийг Dashboard болгох
 admin.site.index = national_dashboard
 
-# A. Суурь эрхийн класс
+# --- A. Суурь эрхийн класс ---
 class BaseAimagAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        if request.user.is_superuser:
-            return qs
+        if request.user.is_superuser: return qs
         try:
             profile = request.user.userprofile
-            if profile.role in ['NAMEM_HQ', 'LAB_RIC']:
-                return qs
+            if profile.role in ['NAMEM_HQ', 'LAB_RIC']: return qs
+            if self.model == Location:
+                return qs.filter(aimag_ref=profile.aimag)
             return qs.filter(location__aimag_ref=profile.aimag)
-        except UserProfile.DoesNotExist:
-            return qs.none() if not request.user.is_superuser else qs
+        except UserProfile.DoesNotExist: return qs.none() if not request.user.is_superuser else qs
 
     def has_delete_permission(self, request, obj=None):
         return request.user.is_superuser
 
-# --- Inline бүртгэлүүд ---
-class DeviceAttachmentInline(admin.TabularInline):
-    model = DeviceAttachment
+# --- B. Сэлбэг захиалгын Инлайн тохиргоо ---
+class SparePartItemInline(admin.TabularInline):
+    model = SparePartItem
     extra = 1
+    autocomplete_fields = ['device_type']
 
-class CalibrationRecordInline(admin.TabularInline):
-    model = CalibrationRecord
-    extra = 1
+# --- C. Үндсэн Админ классууд ---
 
-class DeviceFaultInline(admin.TabularInline):
-    model = DeviceFault
-    extra = 1
-    verbose_name = "Эвдрэлийн түүх"
-    verbose_name_plural = "Эвдрэлийн түүхүүд"
+@admin.register(MasterDevice)
+class MasterDeviceAdmin(admin.ModelAdmin):
+    search_fields = ("name", "category__name")
+    list_display = ("name", "category")
 
-# --- Үндсэн Admin классууд ---
+@admin.register(Location)
+class LocationAdmin(BaseAimagAdmin):
+    list_display = ("name", "location_type", "aimag_ref", "sum_ref", "wmo_index", "view_on_map")
+    list_filter = ("location_type", "aimag_ref", "sum_ref") # Шүүлтүүрүүд
+    search_fields = ("name", "wmo_index")
+    autocomplete_fields = ['aimag_ref', 'sum_ref']
+    change_list_template = "admin/inventory/location/change_list.html"
 
+    def view_on_map(self, obj):
+        if obj.latitude and obj.longitude:
+            url = f"/inventory/map/?name={obj.name}"
+            return format_html('<a href="{}" target="_blank" style="color: #e83e8c; font-weight: bold;">📍 Харах</a>', url)
+        return format_html('<span style="color: #999;">Координатгүй</span>')
+    
+    view_on_map.short_description = "Газрын зураг"
+
+    def changelist_view(self, request, extra_context=None):
+        # 1. Ерөнхий response авах
+        response = super().changelist_view(request, extra_context=extra_context)
+        
+        try:
+            # 2. Sidebar шүүлтүүрээр шүүгдсэн queryset-ийг авч байна
+            qs = response.context_data['cl'].queryset
+        except (AttributeError, KeyError):
+            return response
+
+        # 3. Зөвхөн шүүгдсэн станцуудыг газрын зурагт зориулж бэлдэх
+        map_data = [{
+            'id': loc.id,
+            'name': loc.name,
+            'lat': loc.latitude,
+            'lon': loc.longitude,
+            'type': loc.location_type,
+            'aimag_id': loc.aimag_ref.id,
+            'sum_id': loc.sum_ref.id if loc.sum_ref else None,
+        } for loc in qs.exclude(latitude__isnull=True, longitude__isnull=True)]
+
+        # 4. Хайлтын системд зориулсан Аймаг, Сумын жагсаалт
+        aimags = list(Aimag.objects.values('id', 'name'))
+        sums = list(SumDuureg.objects.values('id', 'name', 'aimag_id'))
+
+        # 5. Context-ийг шинэчлэн дамжуулах
+        response.context_data.update({
+            'locations_json': json.dumps(map_data),
+            'aimags_json': json.dumps(aimags),
+            'sums_json': json.dumps(sums),
+        })
+        return response
+
+@admin.register(Device)
+class DeviceAdmin(BaseAimagAdmin):
+    list_display = ("serial_number", "master_device", "location", "status")
+    change_list_template = "admin/inventory/device/change_list.html"
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path('import-csv/', self.admin_site.admin_view(device_import_csv), name='inventory_device_import_csv'),
+        ]
+        return custom_urls + urls
+
+@admin.register(SparePartOrder)
+class SparePartOrderAdmin(admin.ModelAdmin):
+    list_display = ('order_no', 'aimag', 'station', 'status', 'print_button')
+    list_filter = ('status', 'aimag', 'created_at')
+    inlines = [SparePartItemInline]
+    readonly_fields = ('order_no',)
+
+    def save_model(self, request, obj, form, change):
+        if not obj.order_no:
+            last_order = SparePartOrder.objects.all().order_by('id').last()
+            new_id = (last_order.id + 1) if last_order else 1
+            obj.order_no = f"REQ-{datetime.date.today().year}-{new_id:04d}"
+        super().save_model(request, obj, form, change)
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path('<int:order_id>/print/', self.admin_site.admin_view(self.print_order), name='print_spare_order'),
+        ]
+        return custom_urls + urls
+
+    def print_button(self, obj):
+        return format_html(
+            '<a class="button" href="{}" target="_blank" style="background-color: #447e9b; color: white; padding: 5px 10px; border-radius: 4px; text-decoration: none;">🖨 Хэвлэх</a>',
+            reverse('admin:print_spare_order', args=[obj.pk])
+        )
+
+    def print_order(self, request, order_id):
+        order = SparePartOrder.objects.get(pk=order_id)
+        items = order.items.all()
+        context = {'order': order, 'items': items, 'today': timezone.now()}
+        html = render_to_string('admin/inventory/spare_order_print.html', context)
+        response = HttpResponse(content_type='application/pdf')
+        response['Content-Disposition'] = f'filename="Order_{order.order_no}.pdf"'
+        pisa.CreatePDF(html, dest=response)
+        return response
+
+# --- D. Туслах модулиудыг бүртгэх ---
 @admin.register(Aimag)
 class AimagAdmin(admin.ModelAdmin):
     search_fields = ("name",)
 
 @admin.register(SumDuureg)
 class SumDuuregAdmin(admin.ModelAdmin):
-    list_display = ("name", "aimag")
-    list_filter = ("aimag",)
     search_fields = ("name",)
+    list_display = ("name", "aimag")
 
-@admin.register(Location)
-class LocationAdmin(BaseAimagAdmin):
-    list_display = ("name", "wmo_index", "location_type", "aimag_ref", "get_full_location", "display_owner", "view_on_map")
-    list_filter = ("location_type", "aimag_ref")
-    search_fields = ("name", "wmo_index")
-    autocomplete_fields = ['aimag_ref', 'sum_ref'] 
-    
-    class Media:
-        js = ('https://code.jquery.com/jquery-3.6.0.min.js', 'inventory/js/location_chained.js')
-
-    def get_full_location(self, obj):
-        if obj.sum_ref:
-            return f"{obj.aimag_ref.name} - {obj.sum_ref.name}"
-        return f"{obj.aimag_ref.name} - Сум тодорхойгүй"
-    get_full_location.short_description = "Сум/Дүүрэг"
-
-    def display_owner(self, obj):
-        if obj.owner_org: return obj.owner_org.name
-        return f"{obj.aimag_ref.name} УЦУОШТ" if obj.aimag_ref else "-"
-    display_owner.short_description = "Эзэмшигч байгууллага"
-
-    def view_on_map(self, obj):
-        if obj.latitude and obj.longitude:
-            url = f"/inventory/map/?name={obj.name}"
-            return format_html('<a href="{}" target="_blank" style="text-decoration:none;">📍 Харах</a>', url)
-        return "Координатгүй"
-    view_on_map.short_description = "Газрын зураг"
-
-@admin.register(Device)
-class DeviceAdmin(BaseAimagAdmin):
-    fieldsets = (
-        ('Үндсэн мэдээлэл', {
-            'fields': ('master_device', 'other_device_name', 'serial_number', 'device_type', 'location', 'status')
-        }),
-        ('Ашиглалт ба Баталгаажуулалт', {
-            'fields': ('installation_date', 'lifespan_years', 'valid_until')
-        }),
-    )
-    list_display = ("serial_number", "display_device_name", "location", "status", "lifespan_status", "calibration_status")
-    list_filter = ("status", "device_type", "location__aimag_ref")
-    search_fields = ("serial_number", "master_device__name", "other_device_name")
-    inlines = [DeviceAttachmentInline, CalibrationRecordInline, DeviceFaultInline]
-
-    def display_device_name(self, obj):
-        if obj.other_device_name:
-            return format_html('<i style="color: blue;">{} (Бусад)</i>', obj.other_device_name)
-        return str(obj.master_device)
-    display_device_name.short_description = "Төрөл (Загвар)"
-
-    def lifespan_status(self, obj):
-        expiry = obj.lifespan_expiry
-        if not expiry: return "-"
-        today = timezone.now().date()
-        if expiry < today:
-            return format_html('<b style="color:red;">Дууссан ({})</b>', expiry)
-        if expiry <= today + timezone.timedelta(days=180):
-            return format_html('<b style="color:orange;">Шинэчлэх дөхсөн ({})</b>', expiry)
-        return f"{expiry} хүртэл"
-    lifespan_status.short_description = "Ашиглалтын хугацаа"
-
-    def calibration_status(self, obj):
-        if not obj.valid_until: return format_html('<span style="color:gray;">Мэдээлэлгүй</span>')
-        diff = (obj.valid_until - timezone.now().date()).days
-        color = "red" if diff <= 0 else "orange" if diff <= 60 else "green"
-        text = f"Хэтэрсэн ({abs(diff)} х)" if diff <= 0 else f"Дуусах дөхсөн ({diff} х)" if diff <= 60 else "Хэвийн"
-        return format_html('<b style="color: {};">{}</b>', color, text)
-    calibration_status.short_description = "Баталгаажуулалт"
-
-    def get_urls(self):
-        urls = super().get_urls()
-        return [path('import-csv/', self.admin_site.admin_view(device_import_csv), name='inventory_device_import_csv')] + urls
-
-@admin.register(StandardInstrument)
-class StandardInstrumentAdmin(admin.ModelAdmin):
-    list_display = ("name", "other_standard_name", "serial_number", "accuracy_class", "last_calibration")
-    fields = ("name", "other_standard_name", "serial_number", "accuracy_class", "last_calibration")
-    search_fields = ("name", "other_standard_name", "serial_number")
-
-@admin.register(CalibrationRecord)
-class CalibrationRecordAdmin(admin.ModelAdmin):
-    list_display = ("device", "certificate_no", "issue_date", "expiry_date")
-    search_fields = ("certificate_no", "device__serial_number")
-
-@admin.register(DeviceFault)
-class DeviceFaultAdmin(admin.ModelAdmin):
-    list_display = ("device", "reported_date", "is_fixed", "fixed_date")
-    list_filter = ("is_fixed", "reported_date")
-    search_fields = ("device__serial_number", "fault_description")
-
-@admin.register(SparePartOrder)
-class SparePartOrderAdmin(admin.ModelAdmin):
-    list_display = ("id", "aimag", "status", "created_at")
-    list_filter = ("status", "aimag")
-
-admin.site.register([Organization, MasterDevice, UserProfile, DeviceCategory])
+admin.site.register([
+    Organization, UserProfile, DeviceCategory, 
+    StandardInstrument, CalibrationRecord, DeviceFault
+])

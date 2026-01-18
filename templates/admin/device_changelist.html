@@ -1,0 +1,14 @@
+{% extends "admin/change_list.html" %}
+{% block object-tools-items %}
+    <li>
+        <a href="{% url 'inventory:download_aimag_template' %}" class="addlink" style="background-color: #28a745; color: white;">
+            📥 Template татах
+        </a>
+    </li>
+    <li>
+        <a href="{% url 'inventory:inventory_device_import_csv' %}" class="addlink" style="background-color: #17a2b8; color: white;">
+            📤 CSV оруулах (Import)
+        </a>
+    </li>
+    {{ block.super }}
+{% endblock %}

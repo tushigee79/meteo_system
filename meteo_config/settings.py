@@ -29,10 +29,12 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'meteo_config.urls'
 
+# meteo_config/settings.py
+
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates'], # Энэ мөр байгаа эсэхийг заавал шалгана
+        'DIRS': [BASE_DIR / 'templates'], # Төслийн үндсэн хавтас дахь templates-ийг унших
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
