@@ -1,0 +1,46 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block content %}
+  <div class="content">
+    <h1>{{ title }}</h1>
+
+    <div class="module">
+      <form method="post" enctype="multipart/form-data" novalidate>
+        {% csrf_token %}
+
+        <fieldset class="module aligned">
+          <div class="form-row">
+            {{ form.csv_file.errors }}
+            <label>{{ form.csv_file.label }}:</label>
+            {{ form.csv_file }}
+          </div>
+
+          <div class="form-row">
+            <label>{{ form.dry_run.label }}:</label>
+            {{ form.dry_run }}
+            <p class="help">DRY-RUN үед DB-д бичихгүй, зөвхөн тайлан гаргана.</p>
+          </div>
+
+          <div class="form-row">
+            <label>{{ form.download_report.label }}:</label>
+            {{ form.download_report }}
+            <p class="help">Импортын дэлгэрэнгүй тайланг CSV хэлбэрээр татна.</p>
+          </div>
+        </fieldset>
+
+        <div class="submit-row">
+          <input type="submit" value="Import" class="default">
+          <a class="button cancel-link" href="../">Буцах</a>
+        </div>
+      </form>
+    </div>
+
+    <div class="module">
+      <h2>CSV header (жишээ)</h2>
+      <p>
+        kind, name_mn, code, unit, is_active, sort_order, category, subcategory, usage, notes
+      </p>
+    </div>
+  </div>
+{% endblock %}

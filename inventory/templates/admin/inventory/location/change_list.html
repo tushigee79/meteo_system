@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Станцуудын газрын зураг</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    #map { height: 100%; width: 100%; min-height: 520px; background:#eef2f7; }
+
+    .panel {
+      position: absolute; top: 12px; left: 12px; z-index: 1000;
+      background: rgba(255,255,255,0.96);
+      border: 1px solid #e6e6e6; border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.10);
+      padding: 10px; width: 320px; max-width: calc(100vw - 30px);
+    }
+    .panel h3 { margin: 0 0 8px 0; font-size: 14px; font-weight: 700; letter-spacing: .2px; }
+
+    .search-row { display: flex; gap: 8px; }
+    .search-row input {
+      flex: 1; padding: 9px 10px; border: 1px solid #d9d9d9; border-radius: 10px;
+      outline: none; font-size: 14px;
+    }
+    .search-row button {
+      padding: 9px 12px; border: 1px solid #d9d9d9; border-radius: 10px;
+      background: #fff; cursor: pointer; font-weight: 600;
+    }
+    .hint { margin-top: 8px; font-size: 12px; color: #666; line-height: 1.35; }
+
+    .legend {
+      margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap;
+      font-size: 12px; color: #444;
+    }
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      display: inline-block; margin-right: 6px;
+      border: 2px solid rgba(0,0,0,0.15);
+    }
+
+    .results {
+      margin-top: 10px; max-height: 260px; overflow: auto;
+      border-top: 1px solid #eee; padding-top: 8px;
+    }
+    .item { padding: 8px 8px; border-radius: 10px; cursor: pointer; }
+    .item:hover { background: #f5f7fb; }
+    .item .name { font-weight: 700; font-size: 13px; }
+    .item .meta { font-size: 12px; color: #666; margin-top: 2px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .pill {
+      font-size: 11px; padding: 2px 8px; border-radius: 999px;
+      border: 1px solid #ddd; background: #fff;
+    }
+
+    .mk {
+      width: 14px; height: 14px; border-radius: 50%;
+      border: 2px solid rgba(0,0,0,0.25);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+    }
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+
+  <div class="panel">
+    <h3>Станц хайх</h3>
+    <div class="search-row">
+      <input id="q" type="text" placeholder="Нэр / Аймаг / Төрөлөөр хайх…" autocomplete="off">
+      <button id="clearBtn" type="button">Цэвэрлэх</button>
+    </div>
+    <div class="hint">Жагсаалтаас дарвал цэг дээр очоод багажийн тоо гарна.</div>
+
+    <div class="legend" aria-label="legend">
+      <span><span class="dot" style="background:#2f80ed"></span>Meteo</span>
+      <span><span class="dot" style="background:#27ae60"></span>Hydro</span>
+      <span><span class="dot" style="background:#f2994a"></span>AWS</span>
+    </div>
+
+    <div class="results" id="results"></div>
+  </div>
+
+  <script id="locations-data" type="application/json">{{ locations_json|safe }}</script>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      if (typeof L === "undefined") {
+        console.error("Leaflet ачаалагдсангүй.");
+        return;
+      }
+
+      // --- DATA parse ---
+      let DATA = [];
+      try {
+        const raw = document.getElementById("locations-data").textContent || "[]";
+        DATA = JSON.parse(raw);
+      } catch (e) {
+        console.error("DATA parse error:", e);
+        DATA = [];
+      }
+
+      // --- Map init ---
+      const map = L.map("map", { zoomControl: true }).setView([46.8625, 103.8467], 5);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 18,
+        attribution: "&copy; OpenStreetMap contributors",
+      }).addTo(map);
+      setTimeout(() => map.invalidateSize(), 150);
+
+      const safe = (v) => (v === null || v === undefined ? "" : String(v));
+
+      function normType(t) { return safe(t).trim().toUpperCase(); }
+      function colorByType(t) {
+        const T = normType(t);
+        if (T.includes("HYDRO")) return "#27ae60";
+        if (T.includes("AWS")) return "#f2994a";
+        return "#2f80ed";
+      }
+      function markerIcon(hex) {
+        return L.divIcon({
+          className: "",
+          html: `<div class="mk" style="background:${hex}"></div>`,
+          iconSize: [18, 18],
+          iconAnchor: [9, 9],
+          popupAnchor: [0, -10],
+        });
+      }
+
+      function popupHtml(p) {
+        return `
+          <div style="min-width:200px">
+            <div style="font-weight:800; font-size:14px; margin-bottom:6px;">${safe(p.name)}</div>
+            <div style="font-size:12px; color:#444; line-height:1.5;">
+              <div><b>Аймаг:</b> ${safe(p.aimag)}</div>
+              <div><b>Төрөл:</b> ${safe(p.type)}</div>
+              <div><b>Багажийн тоо:</b> ${safe(p.device_count ?? 0)}</div>
+            </div>
+          </div>
+        `;
+      }
+
+      const markersById = new Map();
+      const layer = L.layerGroup().addTo(map);
+
+      function addAllMarkers(list, fit = true) {
+        layer.clearLayers();
+        markersById.clear();
+
+        const bounds = [];
+        list.forEach((p) => {
+          if (p.lat == null || p.lon == null) return;
+
+          const mk = L.marker([p.lat, p.lon], { icon: markerIcon(colorByType(p.type)) })
+            .bindPopup(popupHtml(p));
+
+          mk.addTo(layer);
+          markersById.set(p.id, mk);
+          bounds.push([p.lat, p.lon]);
+        });
+
+        if (fit && bounds.length > 0) {
+          map.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 });
+        }
+      }
+
+      const q = document.getElementById("q");
+      const results = document.getElementById("results");
+      const clearBtn = document.getElementById("clearBtn");
+
+      function toKey(p) {
+        return `${safe(p.name)} ${safe(p.aimag)} ${safe(p.type)}`.toLowerCase();
+      }
+
+      function renderResults(list) {
+        results.innerHTML = "";
+        if (!list.length) {
+          results.innerHTML = `<div style="padding:10px; color:#777; font-size:13px;">Үр дүн олдсонгүй.</div>`;
+          return;
+        }
+
+        list.slice(0, 100).forEach((p) => {
+          const div = document.createElement("div");
+          div.className = "item";
+          div.innerHTML = `
+            <div class="name">${safe(p.name)}</div>
+            <div class="meta">
+              <span class="pill">${safe(p.aimag) || "—"}</span>
+              <span class="pill">${safe(p.type) || "—"}</span>
+              <span class="pill">Багаж: ${safe(p.device_count ?? 0)}</span>
+            </div>
+          `;
+
+          div.addEventListener("click", () => {
+            const mk = markersById.get(p.id);
+            if (mk) {
+              map.setView(mk.getLatLng(), Math.max(map.getZoom(), 10), { animate: true });
+              mk.openPopup();
+            }
+          });
+
+          results.appendChild(div);
+        });
+      }
+
+      function applyFilter() {
+        const term = (q.value || "").trim().toLowerCase();
+        if (!term) {
+          addAllMarkers(DATA, true);
+          renderResults(DATA);
+          return;
+        }
+        const filtered = DATA.filter((p) => toKey(p).includes(term));
+        addAllMarkers(filtered, true);
+        renderResults(filtered);
+      }
+
+      q.addEventListener("input", applyFilter);
+      clearBtn.addEventListener("click", () => {
+        q.value = "";
+        applyFilter();
+        q.focus();
+      });
+
+      // initial
+      applyFilter();
+
+      // 1 цэгийн map дээр автоматаар төвлөрүүлж popup нээх
+      if (DATA.length === 1) {
+        const p = DATA[0];
+        setTimeout(() => {
+          const mk = markersById.get(p.id);
+          if (mk) {
+            map.setView([p.lat, p.lon], 12);
+            mk.openPopup();
+          }
+        }, 500);
+      }
+    });
+  </script>
+</body>
+</html>

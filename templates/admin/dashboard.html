@@ -1,0 +1,170 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+<style>
+  .dash-h1 { font-size: 28px; font-weight: 700; margin: 6px 0 14px; }
+  .dash-sub { color: #6c757d; margin-bottom: 14px; }
+  .small-box h3 { font-size: 28px; margin: 0; font-weight: 800; }
+  .small-box p { margin: 0; font-size: 14px; }
+  .dash-kpi-label { font-weight: 600; }
+  .dash-note { font-size: 12px; color: #6c757d; }
+  .dash-warn { color: #b00020; font-weight: 700; }
+</style>
+
+<div class="container-fluid">
+
+  <div class="row">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-body">
+          <div class="dash-h1">Тайлан &amp; Статистик (Dashboard)</div>
+          {% if is_scoped %}
+            <div class="dash-sub"><b>Аймаг:</b> {{ aimag }}</div>
+          {% else %}
+            <div class="dash-sub">Ерөнхий харагдац (Admin)</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- KPI cards -->
+  <div class="row">
+
+    <div class="col-lg-3 col-6">
+      <div class="small-box bg-info">
+        <div class="inner">
+          <h3>{{ total_devices }}</h3>
+          <p>Нийт бүртгэл</p>
+        </div>
+        <div class="icon"><i class="fas fa-database"></i></div>
+      </div>
+    </div>
+
+    <div class="col-lg-3 col-6">
+      <div class="small-box bg-success">
+        <div class="inner">
+          <h3>{{ total_normal }}</h3>
+          <p>Багаж</p>
+        </div>
+        <div class="icon"><i class="fas fa-tools"></i></div>
+      </div>
+    </div>
+
+    <div class="col-lg-3 col-6">
+      <div class="small-box bg-primary">
+        <div class="inner">
+          <h3>{{ total_etalon }}</h3>
+          <p>Эталон</p>
+        </div>
+        <div class="icon"><i class="fas fa-balance-scale"></i></div>
+      </div>
+    </div>
+
+    <div class="col-lg-3 col-6">
+      <div class="small-box bg-secondary">
+        <div class="inner">
+          <h3>{{ total_other }}</h3>
+          <p>Бусад</p>
+        </div>
+        <div class="icon"><i class="fas fa-ellipsis-h"></i></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="row">
+
+    <!-- Calibration expiry -->
+    <div class="col-lg-4">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title"><b>Калибровка (хугацаа)</b></h3>
+        </div>
+        <div class="card-body">
+          {% if has_expiry %}
+            <div class="mb-2"><span class="dash-kpi-label">Expired:</span> {{ calib_expired }}</div>
+            <div class="mb-2"><span class="dash-kpi-label">30 хоногт:</span> {{ calib_30 }}</div>
+            <div class="mb-2"><span class="dash-kpi-label">90 хоногт:</span> {{ calib_90 }}</div>
+            <div class="dash-note">Огнооны талбар: <code>{{ expiry_field }}</code></div>
+          {% else %}
+            <div class="dash-warn mb-2">Анхаар: CalibrationLog дээр expiry/valid_until талбар олдсонгүй.</div>
+            <div class="dash-note">
+              <code>expiry_date</code> / <code>valid_until</code> / <code>due_date</code> / <code>next_due_date</code>
+              гэсэн талбаруудын аль нэгийг нэмбэл автоматаар ажиллана.
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Performance -->
+    <div class="col-lg-4">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title"><b>Гүйцэтгэл</b></h3>
+        </div>
+        <div class="card-body">
+          <div class="mb-2"><span class="dash-kpi-label">Калибровка (30 хоног):</span> {{ calib_last30 }}</div>
+          <div class="mb-2"><span class="dash-kpi-label">Калибровка (90 хоног):</span> {{ calib_last90 }}</div>
+          <hr>
+          <div class="mb-2"><span class="dash-kpi-label">Засвар (30 хоног):</span> {{ maint_last30 }}</div>
+          <div class="mb-2"><span class="dash-kpi-label">Засвар (90 хоног):</span> {{ maint_last90 }}</div>
+          <div class="dash-note mt-2">* created_at байхгүй бол тоо “нийт”-ээр гарч болно.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export -->
+    <div class="col-lg-4">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title"><b>Export</b></h3>
+        </div>
+        <div class="card-body">
+          <a class="btn btn-primary" href="{% url 'export_devices_csv' %}">
+            <i class="fas fa-file-csv"></i> Devices CSV татах
+          </a>
+          <div class="dash-note mt-2">
+            Аймгийн инженер бол зөвхөн өөрийн аймгийн өгөгдөл татагдана.
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Kind table -->
+  <div class="row">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title"><b>Төрлөөр (kind)</b></h3>
+        </div>
+        <div class="card-body table-responsive p-0">
+          <table class="table table-striped table-hover">
+            <thead>
+              <tr>
+                <th style="width: 70%;">Kind</th>
+                <th style="width: 30%;">Тоо</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in by_kind %}
+                <tr>
+                  <td>{{ row.catalog_item__kind }}</td>
+                  <td><b>{{ row.n }}</b></td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="2">Мэдээлэл алга</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
