@@ -1,10 +1,11 @@
 {% extends "admin/change_list.html" %}
 
-{% block object-tools %}
-<div class="object-tools">
-    <a class="button" href="{% url 'admin:export_devices_csv' %}">CSV Export</a>
-        CSV Import
+{% block object-tools-items %}
+  <li>
+    <a class="addlink" style="background-color:#17a2b8; color:white;"
+       href="export-csv/">
+      📥 CSV Export
     </a>
-</div>
-{{ block.super }}
+  </li>
+  {{ block.super }}
 {% endblock %}

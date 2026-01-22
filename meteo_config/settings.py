@@ -59,6 +59,7 @@ LANGUAGE_CODE = 'mn'
 TIME_ZONE = 'Asia/Ulaanbaatar'
 USE_I18N = True
 USE_TZ = True
+
 # ✅ Password policy (production-ready)
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -66,11 +67,15 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
+
 LOGIN_URL = "/django-admin/login/"
 LOGIN_REDIRECT_URL = "/django-admin/"
 
 STATIC_URL = "/static/"
-STATICFILES_DIRS = [BASE_DIR / "static"]
+STATICFILES_DIRS = [
+    BASE_DIR / "static",
+    BASE_DIR / "inventory" / "static",
+]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 MEDIA_URL = '/media/'

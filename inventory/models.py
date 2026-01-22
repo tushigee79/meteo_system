@@ -78,11 +78,13 @@ class SumDuureg(models.Model):
     name = models.CharField(max_length=100, verbose_name="Сум/Дүүргийн нэр")
     aimag = models.ForeignKey(Aimag, on_delete=models.CASCADE, related_name="sums")
     code = models.CharField(max_length=20, blank=True, default="", verbose_name="Код")
-    is_ub_district = models.BooleanField(default=False, verbose_name="УБ-ын дүүрэг эсэх")
+
+    # ✅ УБ-ын 9 дүүргийг DB түвшинд ялгах флаг
+    is_ub_district = models.BooleanField(default=False, verbose_name="УБ-ын 9 дүүрэг үү?")
 
     def __str__(self):
-        # Хэрвээ хүсвэл "Аймаг - Сум" гэж харагдуулж болно
-        return self.name
+        # ✅ хүссэн форматаар
+        return f"{self.aimag} - {self.name}"
 
     class Meta:
         unique_together = ("aimag", "name")
@@ -158,7 +160,7 @@ class Location(models.Model):
 
 
 # ============================================================
-# 4) Багаж (Device)  — ганцхан удаа!
+# 4) Хэмжих хэрэгсэл (Device)
 # ============================================================
 class Device(models.Model):
     class Kind(models.TextChoices):
@@ -226,8 +228,9 @@ class Device(models.Model):
         return f"{self.serial_number} - {name}"
 
     class Meta:
-        verbose_name = "Багаж/Эталон"
-        verbose_name_plural = "Багаж/Эталон"
+        # ✅ Optional нэршлийн засвар
+        verbose_name = "Хэмжих хэрэгсэл"
+        verbose_name_plural = "Хэмжих хэрэгсэл"
 
 
 # ============================================================
