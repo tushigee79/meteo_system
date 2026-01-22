@@ -5,3 +5,27 @@ db.sqlite3
 .env
 media/
 static/
+
+# Envs / secrets
+.env
+.env.*
+*.env
+.env.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.log
+
+# Virtualenv
+venv/
+.venv/
+
+# Django
+db.sqlite3
+media/
+staticfiles/
+
+# OS
+.DS_Store
+Thumbs.db

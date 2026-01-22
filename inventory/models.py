@@ -1,144 +1,291 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.utils import timezone
 from django.core.exceptions import ValidationError
-from datetime import date
+from django.conf import settings
 
-# 1. Засаг захиргаа ба Байгууллага
+from inventory.geo.district_lookup import lookup_ub_district
+
+
+# ============================================================
+# 1) ДЦУБ КАТАЛОГ (Лавлах сан)
+# ============================================================
+class InstrumentCatalog(models.Model):
+    class Kind(models.TextChoices):
+        ETALON = "ETALON", "Эталон"
+        WEATHER = "WEATHER", "Цаг уур"
+        HYDRO = "HYDRO", "Ус судлал"
+        AGRI = "AGRI", "Хөдөө аж ахуй"
+
+        RADAR = "RADAR", "Радарын станц"
+        AEROLOGY = "AEROLOGY", "Аэрологийн станц"
+        AWS = "AWS", "Цаг уурын автомат станц (AWS)"
+        OTHER = "OTHER", "Бусад"
+
+    kind = models.CharField(
+        max_length=20,
+        choices=Kind.choices,
+        default=Kind.WEATHER,
+        verbose_name="Төрөл",
+    )
+
+    code = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        help_text="ДЦУБ дотоод код",
+        verbose_name="Код",
+    )
+
+    name_mn = models.CharField(max_length=255, verbose_name="Нэр (Монгол)")
+
+    unit = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        verbose_name="Хэмжих нэгж",
+    )
+
+    is_active = models.BooleanField(default=True, verbose_name="Идэвхтэй")
+    sort_order = models.PositiveIntegerField(default=0, verbose_name="Эрэмбэ")
+
+    class Meta:
+        verbose_name = "ДЦУБ Каталог"
+        verbose_name_plural = "ДЦУБ Каталог"
+        ordering = ["sort_order", "kind", "name_mn"]
+        unique_together = [("kind", "name_mn")]
+
+    def __str__(self):
+        return f"{self.get_kind_display()}: {self.name_mn}"
+
+
+# ============================================================
+# 2) Захиргааны нэгж ба Байгууллага
+# ============================================================
 class Aimag(models.Model):
-    name = models.CharField(max_length=100, verbose_name="Аймгийн нэр")
-    def __str__(self): return self.name
+    name = models.CharField(max_length=100, verbose_name="Аймаг/Нийслэлийн нэр")
+    code = models.CharField(max_length=20, blank=True, default="", verbose_name="Код")
+
+    def __str__(self):
+        return self.name
+
     class Meta:
         verbose_name = "Аймаг/Нийслэл"
         verbose_name_plural = "Аймаг/Нийслэл"
 
+
 class SumDuureg(models.Model):
     name = models.CharField(max_length=100, verbose_name="Сум/Дүүргийн нэр")
-    aimag = models.ForeignKey(Aimag, on_delete=models.CASCADE, related_name='sums', verbose_name="Аймаг")
-    def __str__(self): return self.name
+    aimag = models.ForeignKey(Aimag, on_delete=models.CASCADE, related_name="sums")
+    code = models.CharField(max_length=20, blank=True, default="", verbose_name="Код")
+    is_ub_district = models.BooleanField(default=False, verbose_name="УБ-ын дүүрэг эсэх")
+
+    def __str__(self):
+        # Хэрвээ хүсвэл "Аймаг - Сум" гэж харагдуулж болно
+        return self.name
+
     class Meta:
+        unique_together = ("aimag", "name")
         verbose_name = "Сум/Дүүрэг"
         verbose_name_plural = "Сум/Дүүрэг"
 
+
 class Organization(models.Model):
-    name = models.CharField(max_length=255, verbose_name="Байгууллагын нэр")
-    def __str__(self): return self.name
+    ORG_TYPES = [
+        ("CENTER", "НЦУТ"),
+        ("CAL_LAB", "БОХЗТЛ"),
+        ("OBS_CENTER", "УЦУОШТ"),
+    ]
+
+    name = models.CharField(max_length=255, unique=True, verbose_name="Байгууллагын нэр")
+    org_type = models.CharField(max_length=20, choices=ORG_TYPES, default="OBS_CENTER", verbose_name="Төрөл")
+    aimag = models.ForeignKey(Aimag, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Аймаг/Нийслэл")
+    is_ub = models.BooleanField(default=False, verbose_name="Улаанбаатар хот уу?")
+
+    def __str__(self):
+        return self.name
+
     class Meta:
         verbose_name = "Байгууллага"
         verbose_name_plural = "Байгууллагууд"
 
-# 2. БОХЗТЛ: Эталон багаж
-class StandardInstrument(models.Model):
-    name = models.CharField(max_length=255, verbose_name="Эталон багажийн нэр")
-    serial_number = models.CharField(max_length=100, verbose_name="Серийн дугаар")
-    accuracy_class = models.CharField(max_length=50, verbose_name="Нарийвчлалын ангилал", null=True, blank=True)
-    last_calibration = models.DateField(verbose_name="Сүүлд шалгагдсан", null=True, blank=True)
-    other_standard_name = models.CharField(max_length=255, null=True, blank=True, verbose_name="Бусад (Эталоны нэр бичих)")
 
-    def __str__(self):
-        if self.other_standard_name: return f"Бусад: {self.other_standard_name} ({self.serial_number})"
-        return f"{self.name} ({self.serial_number})"
-
-    class Meta:
-        verbose_name = "Эталон багаж"
-        verbose_name_plural = "Эталон багаж"
-
-# 3. ЦУОШГ: Станцын байршил
+# ============================================================
+# 3) Байршил
+# ============================================================
 class Location(models.Model):
-    name = models.CharField(max_length=255, verbose_name="Станцын нэр")
-    location_type = models.CharField(max_length=20, verbose_name="Төрөл")
+    LOCATION_TYPES = [("METEO", "METEO"), ("HYDRO", "HYDRO"), ("AWS", "AWS"), ("OTHER", "Бусад")]
+
+    name = models.CharField(max_length=255, verbose_name="Нэр")
+    location_type = models.CharField(max_length=20, choices=LOCATION_TYPES, default="METEO", verbose_name="Төрөл")
     aimag_ref = models.ForeignKey(Aimag, on_delete=models.CASCADE, verbose_name="Аймаг")
-    sum_ref = models.ForeignKey(SumDuureg, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Сум")
+    sum_ref = models.ForeignKey(SumDuureg, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Сум/Дүүрэг")
     wmo_index = models.CharField(max_length=10, null=True, blank=True, verbose_name="WMO индекс")
     latitude = models.FloatField(null=True, blank=True, verbose_name="Өргөрөг")
     longitude = models.FloatField(null=True, blank=True, verbose_name="Уртраг")
-    owner_org = models.ForeignKey(Organization, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Байгууллага")
 
-    def __str__(self): return f"{self.name} ({self.aimag_ref.name})"
+    district_name = models.CharField(max_length=100, blank=True, default="", verbose_name="УБ дүүрэг")
+
+    owner_org = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Хариуцагч",
+    )
+
+    def save(self, *args, **kwargs):
+        try:
+            if (
+                self.latitude is not None
+                and self.longitude is not None
+                and self.aimag_ref
+                and self.aimag_ref.name.strip() == "Улаанбаатар"
+            ):
+                props = lookup_ub_district(float(self.longitude), float(self.latitude), base_dir=settings.BASE_DIR)
+                if props and props.get("name_mn"):
+                    self.district_name = props["name_mn"]
+        except Exception:
+            pass
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.name} ({self.aimag_ref})"
 
     class Meta:
         verbose_name = "Байршил"
         verbose_name_plural = "Байршил"
 
-# 4. Багаж хэрэгслийн ангилал
-class DeviceCategory(models.Model):
-    name = models.CharField(max_length=255, verbose_name="Ангиллын нэр")
-    def __str__(self): return self.name
 
-class MasterDevice(models.Model):
-    category = models.ForeignKey(DeviceCategory, on_delete=models.CASCADE, related_name='devices', verbose_name="Ангилал", null=True)
-    name = models.CharField(max_length=255, verbose_name="Стандарт нэр")
-    def __str__(self): 
-        cat_prefix = f"{self.category.name}: " if self.category else ""
-        return f"{cat_prefix}{self.name}"
-
-# 5. Үндсэн Багаж (Device)
+# ============================================================
+# 4) Багаж (Device)  — ганцхан удаа!
+# ============================================================
 class Device(models.Model):
+    class Kind(models.TextChoices):
+        ETALON = InstrumentCatalog.Kind.ETALON, "Эталон"
+        WEATHER = InstrumentCatalog.Kind.WEATHER, "Цаг уур"
+        HYDRO = InstrumentCatalog.Kind.HYDRO, "Ус судлал"
+        AGRI = InstrumentCatalog.Kind.AGRI, "Хөдөө аж ахуй"
+
+        RADAR = InstrumentCatalog.Kind.RADAR, "Радарын станц"
+        AEROLOGY = InstrumentCatalog.Kind.AEROLOGY, "Аэрологийн станц"
+        AWS = InstrumentCatalog.Kind.AWS, "Цаг уурын автомат станц (AWS)"
+        OTHER = InstrumentCatalog.Kind.OTHER, "Бусад"
+
     STATUS_CHOICES = [
-        ('Active', 'Ашиглагдаж буй'), ('Broken', 'Эвдрэлтэй'),
-        ('Repair', 'Засварт байгаа'), ('Spare', 'Нөөцөд байгаа'),
-        ('Retired', 'Ашиглалтаас гарсан')
+        ("Active", "Ашиглагдаж буй"),
+        ("Broken", "Эвдрэлтэй"),
+        ("Repair", "Засварт"),
+        ("Spare", "Нөөц"),
+        ("Retired", "Хасагдсан"),
     ]
-    master_device = models.ForeignKey(MasterDevice, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Төрөл (Загвар)")
-    other_device_name = models.CharField(max_length=255, null=True, blank=True, verbose_name="Бусад (Багажийн нэр бичих)")
+
     serial_number = models.CharField(max_length=100, unique=True, verbose_name="Серийн дугаар")
-    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='Active', verbose_name="Төлөв")
-    location = models.ForeignKey(Location, on_delete=models.CASCADE, related_name="devices", verbose_name="Байршил", null=True, blank=True)
-    installation_date = models.DateField(null=True, blank=True, verbose_name="Суурилуулсан огноо")
-    lifespan_years = models.PositiveIntegerField(default=10, verbose_name="Ашиглах хугацаа (жил)")
-    valid_until = models.DateField(null=True, blank=True, verbose_name="Баталгаажуулалт дуусах")
 
-    @property
-    def lifespan_expiry(self):
-        if self.installation_date:
-            try: return date(self.installation_date.year + self.lifespan_years, self.installation_date.month, self.installation_date.day)
-            except ValueError: return date(self.installation_date.year + self.lifespan_years, self.installation_date.month, self.installation_date.day - 1)
-        return None
+    kind = models.CharField(
+        max_length=20,
+        choices=Kind.choices,
+        default=Kind.WEATHER,
+        verbose_name="Төрөл",
+    )
 
-    def __str__(self): return f"{self.serial_number} ({self.master_device or self.other_device_name})"
+    catalog_item = models.ForeignKey(
+        InstrumentCatalog,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="devices",
+        verbose_name="ДЦУБ жагсаалт",
+    )
 
-# 6. Сэлбэг захиалгын систем (Засварласан хувилбар)
-class SparePartOrder(models.Model):
-    STATUS_CHOICES = [('Draft', 'Ноорог'), ('Sent', 'Илгээсэн'), ('Approved', 'Зөвшөөрөгдсөн'), ('Rejected', 'Татгалзсан'), ('Received', 'Хүлээж авсан')]
-    order_no = models.CharField(max_length=20, unique=True, verbose_name="Захиалгын №")
-    aimag = models.ForeignKey(Aimag, on_delete=models.CASCADE, verbose_name="Аймаг")
-    # Алдаанаас сэргийлж station-г null=True болгов
-    station = models.ForeignKey(Location, on_delete=models.CASCADE, verbose_name="Станц", null=True)
-    engineer = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name="Захиалсан инженер")
-    description = models.TextField(verbose_name="Техникийн үндэслэл")
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Draft', verbose_name="Төлөв")
-    # Алдаанаас сэргийлж created_at-г түр null=True болгов
-    created_at = models.DateTimeField(null=True, blank=True, verbose_name="Үүсгэсэн огноо")
-    updated_at = models.DateTimeField(auto_now=True)
+    other_name = models.CharField(max_length=255, blank=True, default="", verbose_name="Бусад нэр")
 
-    class Meta:
-        verbose_name = "Сэлбэг захиалга"
-        verbose_name_plural = "Сэлбэг захиалга"
+    location = models.ForeignKey(
+        Location,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="devices",
+        verbose_name="Байршил",
+    )
+
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default="Active", verbose_name="Төлөв")
+    installation_date = models.DateField(null=True, blank=True, verbose_name="Суурилуулсан")
+    lifespan_years = models.PositiveIntegerField(default=10, verbose_name="Ашиглалтын хугацаа (жил)")
+
+    def clean(self):
+        # Каталог сонгосон бол төрөл нь таарах ёстой
+        if self.catalog_item and self.catalog_item.kind != self.kind:
+            raise ValidationError({"catalog_item": "Каталогийн төрөл таарахгүй байна."})
+        # OTHER сонгосон бол нэр заавал
+        if self.kind == self.Kind.OTHER and not (self.other_name or "").strip():
+            raise ValidationError({"other_name": "“Бусад” сонгосон бол нэр заавал бөглөнө."})
 
     def __str__(self):
-        return f"{self.order_no} - {self.aimag.name}"
+        name = self.catalog_item.name_mn if self.catalog_item else (self.other_name or "-")
+        return f"{self.serial_number} - {name}"
+
+    class Meta:
+        verbose_name = "Багаж/Эталон"
+        verbose_name_plural = "Багаж/Эталон"
+
+
+# ============================================================
+# 6) Сэлбэг захиалга
+# ============================================================
+class SparePartOrder(models.Model):
+    order_no = models.CharField(max_length=20, unique=True, verbose_name="Захиалгын №")
+    aimag = models.ForeignKey(Aimag, on_delete=models.CASCADE)
+    status = models.CharField(max_length=20, default="Draft")
+    created_at = models.DateTimeField(default=timezone.now)
+
+    def __str__(self):
+        return self.order_no
+
 
 class SparePartItem(models.Model):
-    order = models.ForeignKey(SparePartOrder, related_name='items', on_delete=models.CASCADE)
-    device_type = models.ForeignKey(MasterDevice, on_delete=models.SET_NULL, null=True, verbose_name="Багажны төрөл")
-    part_name = models.CharField(max_length=255, verbose_name="Сэлбэг, хэрэгсэл")
-    model_name = models.CharField(max_length=100, blank=True)
-    serial_no = models.CharField(max_length=100, blank=True)
+    order = models.ForeignKey(SparePartOrder, related_name="items", on_delete=models.CASCADE)
+    part_name = models.CharField(max_length=255)
     quantity = models.PositiveIntegerField(default=1)
 
-# 7. Бусад туслах модулиуд
-class CalibrationRecord(models.Model):
-    device = models.ForeignKey(Device, on_delete=models.CASCADE, verbose_name="Багаж")
-    standard_used = models.ForeignKey(StandardInstrument, on_delete=models.SET_NULL, null=True)
-    issue_date = models.DateField()
-    expiry_date = models.DateField()
 
-class DeviceFault(models.Model):
-    device = models.ForeignKey(Device, on_delete=models.CASCADE, verbose_name="Багаж")
-    fault_description = models.TextField()
-    reported_date = models.DateField(default=date.today)
-
+# ============================================================
+# 7) User Profile
+# ============================================================
 class UserProfile(models.Model):
-    ROLE_CHOICES = [('NAMEM_HQ', 'ЦУОШГ Мэргэжилтэн'), ('LAB_RIC', 'БОХЗТЛ Инженер'), ('AIMAG_ENG', 'Аймгийн Инженер')]
-    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
     aimag = models.ForeignKey(Aimag, on_delete=models.SET_NULL, null=True, blank=True)
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='AIMAG_ENG')
+    role = models.CharField(max_length=20, default="AIMAG_ENG")
+    org = models.ForeignKey(Organization, on_delete=models.SET_NULL, null=True, blank=True)
+
+    must_change_password = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.user.username
+
+
+# ============================================================
+# 8) Auth Audit Log
+# ============================================================
+class AuthAuditLog(models.Model):
+    ACTION_CHOICES = [
+        ("LOGIN_SUCCESS", "LOGIN_SUCCESS"),
+        ("LOGIN_FAILED", "LOGIN_FAILED"),
+        ("FORCED_PW_CHANGE", "FORCED_PW_CHANGE"),
+        ("PASSWORD_CHANGED", "PASSWORD_CHANGED"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    username = models.CharField(max_length=150, blank=True, default="")
+    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
+
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(default=timezone.now)
+    extra = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.created_at:%Y-%m-%d %H:%M:%S} {self.action} {self.username}"

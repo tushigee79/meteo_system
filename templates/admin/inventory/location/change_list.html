@@ -6,7 +6,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        /* Таны хүссэн ягаан хүрээтэй газрын зургийн загвар */
+        /* Ягаан хүрээтэй газрын зургийн загвар */
         #top-map { 
             height: 500px; 
             width: 100%; 
@@ -33,12 +33,12 @@
 
 {% block object-tools-items %}
     <li>
-        <a href="{% url 'inventory:download_aimag_template' %}" class="addlink" style="background-color: #28a745;">
+        <a href="{% url 'admin:download_aimag_template' %}" class="addlink" style="background-color: #28a745;">
             📥 Template татах
         </a>
     </li>
     <li>
-        <a href="{% url 'inventory:inventory_device_import_csv' %}" class="addlink" style="background-color: #17a2b8;">
+        <a href="{% url 'admin:inventory_device_import_csv' %}" class="addlink" style="background-color: #17a2b8;">
             📤 CSV оруулах (Import)
         </a>
     </li>
@@ -48,9 +48,9 @@
 {% block content %}
     <div class="map-legend">
         <strong>Шүүлтүүр:</strong>
-        <label style="cursor:pointer;"><input type="checkbox" class="type-filter" value="Цаг уур (AWS)" checked onchange="drawMap()"> <span style="color: #28a745;">●</span> AWS (Ногоон)</label>
-        <label style="cursor:pointer;"><input type="checkbox" class="type-filter" value="Цаг уур (Meteo)" checked onchange="drawMap()"> <span style="color: #fd7e14;">●</span> Meteo (Улбар шар)</label>
-        <label style="cursor:pointer;"><input type="checkbox" class="type-filter" value="Ус судлал" checked onchange="drawMap()"> <span style="color: #007bff;">●</span> Hydro (Хөх)</label>
+        <label style="cursor:pointer;"><input type="checkbox" class="type-filter" value="METEO" checked onchange="drawMap()"> <span style="color: #fd7e14;">●</span> Цаг уур (Улбар шар)</label>
+        <label style="cursor:pointer;"><input type="checkbox" class="type-filter" value="HYDRO" checked onchange="drawMap()"> <span style="color: #007bff;">●</span> Ус судлал (Хөх)</label>
+        <label style="cursor:pointer;"><input type="checkbox" class="type-filter" value="AGRO" checked onchange="drawMap()"> <span style="color: #28a745;">●</span> Агро (Ногоон)</label>
         <small style="margin-left: auto; color: #666;">* Баруун талын шүүлтүүрийг ашиглан Аймаг/Сумаар харж болно.</small>
     </div>
 
@@ -60,25 +60,24 @@
     <script>
         let map;
         let markersGroup = L.featureGroup();
-        const rawLocations = {{ locations_json|safe }};
+        // Модел дээрх өгөгдлийг авах
+        const rawLocations = {{ locations_json|safe|default:"[]" }};
 
         function getColor(type) {
-            if (type.includes('AWS')) return '#28a745';    // Ногоон
-            if (type.includes('Meteo')) return '#fd7e14';  // Улбар шар
-            if (type.includes('Ус судлал')) return '#007bff'; // Хөх
+            if (type === 'METEO') return '#fd7e14';  // Улбар шар
+            if (type === 'HYDRO') return '#007bff';  // Хөх
+            if (type === 'AGRO') return '#28a745';   // Ногоон
             return '#6c757d'; 
         }
 
         function drawMap() {
-            // Хуучин маркеруудыг цэвэрлэх
+            if (!map) return;
             markersGroup.clearLayers();
 
-            // Идэвхтэй байгаа төрлүүдийг авах
             const activeTypes = Array.from(document.querySelectorAll('.type-filter:checked')).map(cb => cb.value);
 
             rawLocations.forEach(function(loc) {
-                // Төрөл нь идэвхтэй байгаа эсэхийг шалгах
-                const isTypeActive = activeTypes.some(t => loc.type.includes(t) || t.includes(loc.type));
+                const isTypeActive = activeTypes.includes(loc.type);
 
                 if (loc.lat && loc.lon && isTypeActive) {
                     const marker = L.circleMarker([loc.lat, loc.lon], {
@@ -93,7 +92,7 @@
                             <b style="font-size: 14px;">${loc.name}</b><br>
                             <hr style="margin: 5px 0;">
                             <b>Төрөл:</b> ${loc.type}<br>
-                            <b>Байршил:</b> ${loc.aimag || 'Тодорхойгүй'}
+                            <b>Аймаг ID:</b> ${loc.aimag_id}
                         </div>
                     `);
                     markersGroup.addLayer(marker);
@@ -102,7 +101,6 @@
 
             markersGroup.addTo(map);
 
-            // Шүүгдсэн цэгүүд дээр газрын зургийг тааруулах (Zoom Fit)
             if (markersGroup.getLayers().length > 0) {
                 map.fitBounds(markersGroup.getBounds().pad(0.2));
             } else {
@@ -111,13 +109,11 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
-            // Газрын зургийг эхлүүлэх
             map = L.map('top-map').setView([46.8625, 103.8467], 5);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { 
                 attribution: 'NAMEM 2026' 
             }).addTo(map);
 
-            // Анхны зураглалыг зурах
             drawMap();
         });
     </script>
