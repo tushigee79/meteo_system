@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ station.name }} - Байршил</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        #map { height: 100vh; width: 100%; }
+        body { margin: 0; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        var map = L.map('map').setView([{{ station.latitude }}, {{ station.longitude }}], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: 'NAMEM 2026'
+        }).addTo(map);
+
+        L.marker([{{ station.latitude }}, {{ station.longitude }}]).addTo(map)
+            .bindPopup("<b>{{ station.name }}</b><br>{{ station.aimag_ref.name }}")
+            .openPopup();
+    </script>
+</body>
+</html>

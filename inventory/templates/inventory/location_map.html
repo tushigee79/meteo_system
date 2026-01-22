@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Станцуудын газрын зураг</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, Arial, sans-serif; }
+    #map { height: 100%; width: 100%; min-height: 520px; background:#eef2f7; }
+
+    .panel {
+      position: absolute; top: 12px; left: 12px; z-index: 1000;
+      background: rgba(255,255,255,0.96);
+      padding: 10px; border-radius: 10px; width: 340px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    .search-row { display: flex; gap: 6px; margin-bottom: 10px; }
+    .search-row input { flex: 1; padding: 7px; border: 1px solid #ccc; border-radius: 6px; }
+    .search-row button { padding: 7px 10px; border-radius: 6px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+
+    .legend { margin-top: 6px; display:flex; gap:8px; flex-wrap:wrap; }
+    .lgbtn{
+      display:inline-flex; align-items:center; gap:6px;
+      padding:5px 8px; border-radius:999px;
+      border:1px solid #ddd; background:#fff;
+      cursor:pointer; font-size:12px; font-weight:800;
+      user-select:none;
+    }
+    .lgbtn.off{
+      opacity:.35;
+      text-decoration: line-through;
+      filter: grayscale(1);
+    }
+    .dot {
+      width:10px; height:10px; border-radius:50%;
+      display:inline-block; border:2px solid rgba(0,0,0,0.15);
+    }
+
+    .results { margin-top: 10px; max-height: 340px; overflow-y: auto; font-size: 13px; border-top: 1px solid #eee; }
+    .item { padding: 6px; border-bottom: 1px solid #f0f0f0; cursor: pointer; }
+    .item:hover { background: #f3f6ff; }
+
+    .mk {
+      width: 12px; height: 12px; border-radius: 50%;
+      border: 2px solid #fff;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.35);
+    }
+
+    .stat {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #666;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="panel">
+  <h4 style="margin:0 0 8px 0;">Станц хайх</h4>
+
+  <div class="search-row">
+    <input id="q" type="text" placeholder="Нэр, Аймаг, Төрөл..." autocomplete="off">
+    <button id="clearBtn" type="button">Цэвэрлэх</button>
+  </div>
+
+  <!-- ✅ Toggle legend -->
+  <div class="legend" id="legend">
+    <button type="button" class="lgbtn" data-type="METEO">
+      <span class="dot" style="background:#2f80ed"></span>METEO
+    </button>
+    <button type="button" class="lgbtn" data-type="HYDRO">
+      <span class="dot" style="background:#27ae60"></span>HYDRO
+    </button>
+    <button type="button" class="lgbtn" data-type="AWS">
+      <span class="dot" style="background:#f2994a"></span>AWS
+    </button>
+  </div>
+
+  <div class="stat" id="stat"></div>
+  <div class="results" id="results"></div>
+</div>
+
+<!-- Django JSON -->
+<script id="locations-data" type="application/json">{{ locations_json|safe }}</script>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  // Console-оос шалгах боломжтой
+  window.DATA = [];
+
+  const dataEl = document.getElementById("locations-data");
+  if (!dataEl) { console.error("locations-data олдсонгүй"); return; }
+
+  try {
+    window.DATA = JSON.parse(dataEl.textContent || "[]");
+    console.log("DATA loaded:", window.DATA.length);
+  } catch (e) {
+    console.error("JSON parse error:", e);
+    return;
+  }
+
+  if (typeof L === "undefined") {
+    console.error("Leaflet (L) ачаалагдсангүй байна");
+    return;
+  }
+
+  const map = L.map("map").setView([46.8625, 103.8467], 5);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18 }).addTo(map);
+
+  const layer = L.layerGroup().addTo(map);
+  const markersById = new Map();
+
+  // ✅ Toggle state
+  const activeTypes = { METEO: true, HYDRO: true, AWS: true };
+
+  function normType(type) {
+    const t = (type || "").toUpperCase().trim();
+    if (t.includes("HYDRO")) return "HYDRO";
+    if (t.includes("AWS")) return "AWS";
+    return "METEO";
+  }
+
+  function getColor(type) {
+    const k = normType(type);
+    if (k === "HYDRO") return "#27ae60";
+    if (k === "AWS") return "#f2994a";
+    return "#2f80ed";
+  }
+
+  function markerIcon(color) {
+    return L.divIcon({
+      className: "",
+      html: `<div class="mk" style="background:${color}"></div>`,
+      iconSize: [16,16],
+      iconAnchor: [8,8],
+      popupAnchor: [0,-10]
+    });
+  }
+
+  function popupHtml(p) {
+    const name = p.name ?? "—";
+    const aimag = p.aimag ?? "—";
+    const t = normType(p.type);
+    const dc = p.device_count ?? 0;
+    return `<b>${name}</b><br>${aimag}<br>Төрөл: ${t}<br>Багаж: ${dc}`;
+  }
+
+  function addMarkers(list) {
+    layer.clearLayers();
+    markersById.clear();
+    const bounds = [];
+
+    list.forEach(p => {
+      const k = normType(p.type);
+      if (!activeTypes[k]) return;
+
+      if (p.lat == null || p.lon == null) return;
+      const lat = parseFloat(p.lat);
+      const lon = parseFloat(p.lon);
+      if (Number.isNaN(lat) || Number.isNaN(lon)) return;
+
+      const mk = L.marker([lat, lon], { icon: markerIcon(getColor(p.type)) })
+        .bindPopup(popupHtml(p));
+
+      mk.addTo(layer);
+      markersById.set(p.id, mk);
+      bounds.push([lat, lon]);
+    });
+
+    if (bounds.length) map.fitBounds(bounds, { padding: [40,40] });
+  }
+
+  function renderResults(list) {
+    const resultsEl = document.getElementById("results");
+    const statEl = document.getElementById("stat");
+    resultsEl.innerHTML = "";
+
+    const viewList = list.filter(p => activeTypes[normType(p.type)]);
+
+    statEl.textContent = `Харагдаж буй: ${viewList.length} / ${window.DATA.length}`;
+
+    if (!viewList.length) {
+      resultsEl.innerHTML = "<div style='padding:8px;color:#777'>Үр дүн олдсонгүй</div>";
+      return;
+    }
+
+    viewList.slice(0, 200).forEach(p => {
+      const div = document.createElement("div");
+      div.className = "item";
+      div.innerHTML = `<b>${p.name ?? "—"}</b> <span style="color:#666">(${p.aimag ?? "—"})</span> <span style="color:#888">[${normType(p.type)}]</span>`;
+
+      div.addEventListener("click", () => {
+        const mk = markersById.get(p.id);
+        if (!mk) return;
+        map.setView(mk.getLatLng(), 12);
+        mk.openPopup();
+      });
+
+      resultsEl.appendChild(div);
+    });
+  }
+
+  function applyFilter() {
+    const qEl = document.getElementById("q");
+    const term = (qEl.value || "").toLowerCase().trim();
+
+    const filtered = !term
+      ? window.DATA
+      : window.DATA.filter(p => (`${p.name||""} ${p.aimag||""} ${p.type||""}`.toLowerCase()).includes(term));
+
+    addMarkers(filtered);
+    renderResults(filtered);
+  }
+
+  // ✅ Search + clear
+  const qEl = document.getElementById("q");
+  const clearBtn = document.getElementById("clearBtn");
+
+  qEl.addEventListener("input", applyFilter);
+  clearBtn.addEventListener("click", () => {
+    qEl.value = "";
+    applyFilter();
+    qEl.focus();
+  });
+
+  // ✅ Legend toggle click
+  document.querySelectorAll("#legend .lgbtn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const t = btn.getAttribute("data-type");
+      activeTypes[t] = !activeTypes[t];
+      btn.classList.toggle("off", !activeTypes[t]);
+      applyFilter();
+    });
+  });
+
+  // Initial
+  applyFilter();
+  setTimeout(() => map.invalidateSize(), 300);
+});
+</script>
+
+</body>
+</html>

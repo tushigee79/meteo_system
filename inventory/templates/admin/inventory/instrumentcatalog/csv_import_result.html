@@ -1,0 +1,43 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>{{ title }}</h1>
+
+<ul>
+  <li><b>INSERTED:</b> {{ counts.INSERTED }}</li>
+  <li><b>SKIP_EXISTING:</b> {{ counts.SKIP_EXISTING }}</li>
+  <li><b>SKIP_DUP_IN_CSV:</b> {{ counts.SKIP_DUP_IN_CSV }}</li>
+  <li><b>INVALID:</b> {{ counts.INVALID }}</li>
+</ul>
+
+<form method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+  {# тайлан татах POST (upload хийхгүй) #}
+  <input type="hidden" name="download_report" value="1">
+  <button class="button" type="submit">Report CSV татах</button>
+</form>
+
+<hr>
+
+<h2>Preview (эхний 1000 мөр)</h2>
+<table class="adminlist table" style="width:100%;max-width:1100px">
+  <thead>
+    <tr>
+      <th>Line</th>
+      <th>Code</th>
+      <th>Status</th>
+      <th>Reason</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in report %}
+      <tr>
+        <td>{{ r.line }}</td>
+        <td>{{ r.code }}</td>
+        <td>{{ r.status }}</td>
+        <td>{{ r.reason }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}
