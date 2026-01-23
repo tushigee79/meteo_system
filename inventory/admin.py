@@ -25,52 +25,163 @@ from .models import (
 )
 
 # ============================================================
-# ✅ Instrument Catalog
+# ✅ Instrument Catalog (SAFE / model-aware)
 # ============================================================
 @admin.register(InstrumentCatalog)
 class InstrumentCatalogAdmin(admin.ModelAdmin):
-    list_display = ("kind", "code", "name_mn", "unit", "is_active", "sort_order")
-    list_filter = ("kind", "is_active")
-    search_fields = ("code", "name_mn")
-    ordering = ("sort_order", "kind", "name_mn")
+    base_list_display = ("kind", "code", "name_mn", "sort_order")
+    base_list_filter = ("kind",)
+    base_search_fields = ("name_mn", "code")
+    ordering = ("kind", "sort_order", "name_mn")
+
+    change_list_template = "admin/inventory/instrumentcatalog/import_csv.html"
+
+    def _has_field(self, name: str) -> bool:
+        return any(f.name == name for f in self.model._meta.get_fields())
+
+    def get_list_display(self, request):
+        cols = list(self.base_list_display)
+        if self._has_field("subcategory"):
+            cols.insert(3, "subcategory")
+        return tuple(cols)
+
+    def get_list_filter(self, request):
+        filters = list(self.base_list_filter)
+        if self._has_field("subcategory"):
+            filters.append("subcategory")
+        return tuple(filters)
+
+    search_fields = base_search_fields
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "import-csv/",
+                self.admin_site.admin_view(self.import_csv),
+                name="inventory_instrumentcatalog_import_csv",
+            ),
+        ]
+        return custom + urls
+
+    def import_csv(self, request):
+        if request.method == "POST" and request.FILES.get("csv_file"):
+            f = request.FILES["csv_file"]
+            raw = f.read().decode("utf-8-sig").splitlines()
+            reader = csv.DictReader(raw)
+
+            created = 0
+            updated = 0
+
+            for row in reader:
+                kind = (row.get("kind") or "").strip()
+                code = (row.get("code") or "").strip()
+                name_mn = (row.get("name_mn") or "").strip()
+                sort_order = row.get("sort_order") or "0"
+
+                if not (kind and code and name_mn):
+                    continue
+
+                defaults = {
+                    "name_mn": name_mn,
+                    "sort_order": int(sort_order) if str(sort_order).isdigit() else 0,
+                }
+
+                if self._has_field("subcategory"):
+                    defaults["subcategory"] = (row.get("subcategory") or "").strip()
+
+                _, is_created = InstrumentCatalog.objects.update_or_create(
+                    kind=kind,
+                    code=code,
+                    defaults=defaults,
+                )
+                created += 1 if is_created else 0
+                updated += 0 if is_created else 1
+
+            ctx = dict(
+                self.admin_site.each_context(request),
+                title="CSV импорт (InstrumentCatalog)",
+                created=created,
+                updated=updated,
+            )
+            return TemplateResponse(
+                request,
+                "admin/inventory/instrumentcatalog/import_csv_result.html",
+                ctx,
+            )
+
+        ctx = dict(self.admin_site.each_context(request), title="CSV импорт (InstrumentCatalog)")
+        return TemplateResponse(
+            request,
+            "admin/inventory/instrumentcatalog/import_csv.html",
+            ctx,
+        )
+
+    class Media:
+        js = ("inventory/js/admin/instrumentcatalog_dependent_subcategory.js",)
 
 
 # ============================================================
-# ✅ Aimag / SumDuureg
+# ✅ Aimag / SumDuureg / Organization
 # ============================================================
 @admin.register(Aimag)
 class AimagAdmin(admin.ModelAdmin):
-    list_display = ("name", "code")
     search_fields = ("name", "code")
+    list_display = ("name", "code")
     ordering = ("name",)
 
 
 @admin.register(SumDuureg)
 class SumDuuregAdmin(admin.ModelAdmin):
+    search_fields = ("name", "code")
     list_display = ("name", "aimag", "code", "is_ub_district")
     list_filter = ("aimag", "is_ub_district")
-    search_fields = ("name", "code", "aimag__name")
-    autocomplete_fields = ("aimag",)
     ordering = ("aimag__name", "name")
+    autocomplete_fields = ("aimag",)
 
 
-# ============================================================
-# ✅ Organization
-# ============================================================
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
-    list_display = ("name", "org_type", "aimag", "is_ub")
-    list_filter = ("org_type", "aimag", "is_ub")
-    search_fields = ("name", "aimag__name")
+    search_fields = ("name",)
+    list_display = ("name", "org_type", "aimag")
+    list_filter = ("org_type", "aimag")
     autocomplete_fields = ("aimag",)
     ordering = ("name",)
 
 
 # ============================================================
-# ✅ Location Admin (map one + cascade + template)
+# ✅ Location admin form (Aimag -> Sum cascade)
+# ============================================================
+class LocationAdminForm(forms.ModelForm):
+    class Meta:
+        model = Location
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        aimag = getattr(self.instance, "aimag_ref", None)
+        aimag_id = (self.data.get("aimag_ref") or "").strip()
+
+        if aimag_id.isdigit():
+            aimag = Aimag.objects.filter(id=int(aimag_id)).first()
+
+        if aimag:
+            qs = SumDuureg.objects.filter(aimag=aimag).order_by("name")
+            if (aimag.name or "").strip() == "Улаанбаатар":
+                qs = qs.filter(is_ub_district=True)
+            self.fields["sum_ref"].queryset = qs
+        else:
+            self.fields["sum_ref"].queryset = SumDuureg.objects.none()
+
+
+# ============================================================
+# ✅ Location
 # ============================================================
 @admin.register(Location)
 class LocationAdmin(admin.ModelAdmin):
+    form = LocationAdminForm
+
     list_display = (
         "name",
         "location_type",
@@ -85,10 +196,9 @@ class LocationAdmin(admin.ModelAdmin):
     )
     list_filter = ("location_type", "aimag_ref", "sum_ref", "owner_org")
     search_fields = ("name", "wmo_index", "district_name")
-    autocomplete_fields = ("aimag_ref", "sum_ref", "owner_org")
+    autocomplete_fields = ("owner_org",)
     ordering = ("aimag_ref__name", "name")
 
-    # ✅ “Харах” линк
     def view_map_link(self, obj):
         url = reverse("admin:inventory_location_location_map_one", args=[obj.pk])
         return format_html('<a class="button" href="{}">Харах</a>', url)
@@ -134,7 +244,6 @@ class LocationAdmin(admin.ModelAdmin):
 
         qs = SumDuureg.objects.filter(aimag=aimag)
 
-        # ✅ Улаанбаатар бол зөвхөн 9 дүүрэг
         if (aimag.name or "").strip() == "Улаанбаатар":
             qs = qs.filter(is_ub_district=True)
 
@@ -146,47 +255,45 @@ class LocationAdmin(admin.ModelAdmin):
 
     def locations_by_sum(self, request):
         sum_id = (request.GET.get("sum_id") or "").strip()
-        q = (request.GET.get("q") or "").strip()
-
         if not sum_id.isdigit():
             return JsonResponse({"results": []})
 
-        qs = Location.objects.filter(sum_ref_id=int(sum_id))
-
-        if q:
-            qs = qs.filter(Q(name__icontains=q) | Q(wmo_index__icontains=q))
-
-        qs = qs.order_by("name")[:200]
+        qs = Location.objects.filter(sum_ref_id=int(sum_id)).order_by("name")[:300]
         return JsonResponse({"results": [{"id": x.id, "text": x.name} for x in qs]})
 
     def download_aimag_template(self, request):
         resp = HttpResponse(content_type="text/csv; charset=utf-8")
         resp["Content-Disposition"] = 'attachment; filename="aimag_template.csv"'
         resp.write("\ufeff")
+
         w = csv.writer(resp)
-        w.writerow(["aimag", "sum", "code"])
-        w.writerow(["Улаанбаатар", "Баянзүрх", ""])
+        w.writerow(["name", "code"])
+        w.writerow(["Улаанбаатар", "UB"])
+        w.writerow(["Архангай", "AR"])
         return resp
 
-    # ✅ Нэг байршлын map view
     def location_map_one(self, request, pk: int):
         loc = Location.objects.filter(pk=pk).first()
         if not loc:
-            return HttpResponse("Location not found", status=404)
+            return TemplateResponse(
+                request,
+                "admin/inventory/location/location_map_one.html",
+                dict(self.admin_site.each_context(request), title="Not found"),
+            )
 
         device_count = Device.objects.filter(location=loc).count()
 
         points = []
-        if loc.latitude is not None and loc.longitude is not None:
+        for _loc in [loc]:
             try:
                 points.append(
                     {
-                        "id": loc.id,
-                        "name": loc.name,
-                        "aimag": str(loc.aimag_ref),
-                        "type": loc.location_type,
-                        "lat": float(loc.latitude),
-                        "lon": float(loc.longitude),
+                        "id": _loc.id,
+                        "name": _loc.name,
+                        "aimag": str(_loc.aimag_ref),
+                        "type": _loc.location_type,
+                        "lat": float(_loc.latitude),
+                        "lon": float(_loc.longitude),
                         "device_count": device_count,
                     }
                 )
@@ -205,9 +312,7 @@ class LocationAdmin(admin.ModelAdmin):
         )
 
     class Media:
-        js = (
-            "inventory/js/admin/location_cascade.js",
-        )
+        js = ("inventory/js/admin/location_cascade.js",)
 
 
 # ============================================================
@@ -232,7 +337,6 @@ class DeviceAdminForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # initial aimag/sum from existing location
         loc = getattr(self.instance, "location", None)
         if loc and getattr(loc, "aimag_ref", None):
             self.fields["aimag"].initial = loc.aimag_ref
@@ -247,12 +351,29 @@ class DeviceAdminForm(forms.ModelForm):
         aimag_id = (self.data.get("aimag") or "").strip()
         if aimag_id.isdigit():
             qs = SumDuureg.objects.filter(aimag_id=int(aimag_id)).order_by("name")
-            aimag_name = Aimag.objects.filter(id=int(aimag_id)).values_list("name", flat=True).first() or ""
+            aimag_name = (
+                Aimag.objects.filter(id=int(aimag_id)).values_list("name", flat=True).first()
+                or ""
+            )
             if (aimag_name or "").strip() == "Улаанбаатар":
                 qs = qs.filter(is_ub_district=True)
             self.fields["sumduureg"].queryset = qs
 
-        # catalog_item queryset filter by kind (initial render)
+        # ✅ server-side хамгаалалт: sumduureg сонгогдоогүй бол Location хоосон
+        if "location" in self.fields:
+            sum_id = (self.data.get("sumduureg") or "").strip()
+            if sum_id.isdigit():
+                self.fields["location"].queryset = Location.objects.filter(
+                    sum_ref_id=int(sum_id)
+                ).order_by("name")
+            elif loc and getattr(loc, "sum_ref_id", None):
+                self.fields["location"].queryset = Location.objects.filter(
+                    sum_ref_id=loc.sum_ref_id
+                ).order_by("name")
+            else:
+                self.fields["location"].queryset = Location.objects.none()
+
+        # catalog_item queryset filter by kind
         kind = (self.data.get("kind") or "").strip() or getattr(self.instance, "kind", None)
         if "catalog_item" in self.fields:
             qs = InstrumentCatalog.objects.all()
@@ -282,17 +403,40 @@ class DeviceAdmin(admin.ModelAdmin):
         "lifespan_years",
     )
     list_filter = ("kind", "status", "location__aimag_ref", "location__location_type")
-    search_fields = ("serial_number", "other_name", "catalog_item__name_mn", "catalog_item__code", "location__name", "location__wmo_index")
-    autocomplete_fields = ("catalog_item", "location")
+    search_fields = (
+        "serial_number",
+        "other_name",
+        "catalog_item__name_mn",
+        "catalog_item__code",
+        "location__name",
+        "location__wmo_index",
+    )
+    autocomplete_fields = ("location",)
     ordering = ("serial_number",)
 
     def get_urls(self):
         urls = super().get_urls()
         custom = [
-            path("catalog-by-kind/", self.admin_site.admin_view(self.catalog_by_kind), name="device_catalog_by_kind"),
-            path("sums-by-aimag/", self.admin_site.admin_view(self.sums_by_aimag), name="device_sums_by_aimag"),
-            path("locations-by-sum/", self.admin_site.admin_view(self.locations_by_sum), name="device_locations_by_sum"),
-            path("export-csv/", self.admin_site.admin_view(self.export_devices_csv), name="export_devices_csv"),
+            path(
+                "catalog-by-kind/",
+                self.admin_site.admin_view(self.catalog_by_kind),
+                name="device_catalog_by_kind",
+            ),
+            path(
+                "sums-by-aimag/",
+                self.admin_site.admin_view(self.sums_by_aimag),
+                name="device_sums_by_aimag",
+            ),
+            path(
+                "locations-by-sum/",
+                self.admin_site.admin_view(self.locations_by_sum),
+                name="device_locations_by_sum",
+            ),
+            path(
+                "export-csv/",
+                self.admin_site.admin_view(self.export_devices_csv),
+                name="export_devices_csv",
+            ),
         ]
         return custom + urls
 
@@ -309,18 +453,25 @@ class DeviceAdmin(admin.ModelAdmin):
         qs = qs.order_by("sort_order", "name_mn")[:200]
         return JsonResponse({"results": [{"id": x.id, "text": x.name_mn} for x in qs]})
 
+    # ✅ FINAL (aid==1): DeviceAdmin.sums_by_aimag
     def sums_by_aimag(self, request):
         aimag_id = (request.GET.get("aimag_id") or "").strip()
+        qs = SumDuureg.objects.none()
+
         if not aimag_id.isdigit():
             return JsonResponse({"results": []})
 
-        qs = SumDuureg.objects.filter(aimag_id=int(aimag_id)).order_by("name")
+        aid = int(aimag_id)
 
-        aimag_name = Aimag.objects.filter(id=int(aimag_id)).values_list("name", flat=True).first() or ""
-        if (aimag_name or "").strip() == "Улаанбаатар":
-            qs = qs.filter(is_ub_district=True)
+        if aid == 1:
+            # УБ: зөвхөн 9 дүүрэг
+            qs = SumDuureg.objects.filter(aimag_id=1, is_ub_district=True)
+        else:
+            # Бусад аймаг: тухайн аймгийн сум (is_ub_district=False)
+            qs = SumDuureg.objects.filter(aimag_id=aid, is_ub_district=False)
 
-        return JsonResponse({"results": [{"id": s.id, "text": s.name} for s in qs]})
+        qs = qs.order_by("name")[:500]
+        return JsonResponse({"results": [{"id": x.id, "text": x.name} for x in qs]})
 
     def locations_by_sum(self, request):
         sum_id = (request.GET.get("sum_id") or "").strip()
@@ -341,11 +492,41 @@ class DeviceAdmin(admin.ModelAdmin):
         resp = HttpResponse(content_type="text/csv; charset=utf-8")
         resp["Content-Disposition"] = f'attachment; filename="devices_{now().date()}.csv"'
         resp.write("\ufeff")
-
         w = csv.writer(resp)
-        w.writerow(["ID", "Каталог", "Бусад нэр", "Серийн №", "Байршил"])
+
+        w.writerow(
+            [
+                "serial_number",
+                "kind",
+                "catalog_code",
+                "catalog_name",
+                "other_name",
+                "location",
+                "aimag",
+                "sumduureg",
+                "status",
+                "installation_date",
+                "lifespan_years",
+            ]
+        )
+
         for d in qs:
-            w.writerow([d.id, getattr(d.catalog_item, "name_mn", ""), d.other_name, d.serial_number, getattr(d.location, "name", "") if d.location else ""])
+            w.writerow(
+                [
+                    d.serial_number,
+                    d.kind,
+                    getattr(d.catalog_item, "code", ""),
+                    getattr(d.catalog_item, "name_mn", ""),
+                    d.other_name,
+                    getattr(d.location, "name", ""),
+                    getattr(getattr(d.location, "aimag_ref", None), "name", ""),
+                    getattr(getattr(d.location, "sum_ref", None), "name", ""),
+                    d.status,
+                    d.installation_date,
+                    d.lifespan_years,
+                ]
+            )
+
         return resp
 
     class Media:
@@ -365,40 +546,70 @@ class SparePartItemInline(admin.TabularInline):
 
 @admin.register(SparePartOrder)
 class SparePartOrderAdmin(admin.ModelAdmin):
-    list_display = ("order_no", "aimag", "status", "created_at")
-    list_filter = ("status", "aimag")
-    search_fields = ("order_no", "aimag__name")
-    autocomplete_fields = ("aimag",)
+    list_display = ("created_at", "aimag", "status")
+    list_filter = ("aimag", "status")
     inlines = [SparePartItemInline]
-    ordering = ("-created_at",)
-
-
-@admin.register(SparePartItem)
-class SparePartItemAdmin(admin.ModelAdmin):
-    list_display = ("order", "part_name", "quantity")
-    search_fields = ("part_name", "order__order_no")
-    autocomplete_fields = ("order",)
 
 
 # ============================================================
-# ✅ UserProfile
+# ✅ Users / audit
 # ============================================================
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "role", "aimag", "org", "must_change_password")
-    list_filter = ("role", "aimag", "org", "must_change_password")
-    search_fields = ("user__username", "user__email", "aimag__name", "org__name")
-    autocomplete_fields = ("user", "aimag", "org")
+    list_display = ("user", "aimag", "org", "must_change_password")
+    list_filter = ("aimag", "must_change_password")
+    search_fields = ("user__username", "user__email")
 
 
 # ============================================================
-# ✅ Auth audit log (readonly)
+# ✅ AuthAuditLog (SAFE / model-aware)
 # ============================================================
 @admin.register(AuthAuditLog)
 class AuthAuditLogAdmin(admin.ModelAdmin):
-    list_display = ("created_at", "action", "username", "user", "ip_address")
-    list_filter = ("action", "created_at")
-    search_fields = ("username", "user__username", "ip_address", "user_agent")
-    autocomplete_fields = ("user",)
-    ordering = ("-created_at",)
-    readonly_fields = ("user", "username", "action", "ip_address", "user_agent", "created_at", "extra")
+    def _fields(self):
+        return {f.name for f in self.model._meta.get_fields()}
+
+    def _pick(self, *candidates):
+        fs = self._fields()
+        for c in candidates:
+            if c in fs:
+                return c
+        return None
+
+    def get_list_display(self, request):
+        fs = self._fields()
+        cols = []
+
+        t = self._pick("timestamp", "created_at", "created", "time", "datetime")
+        u = self._pick("user", "username", "actor")
+        ip = self._pick("ip_address", "ip", "remote_addr")
+        ok = self._pick("success", "is_success", "ok", "result")
+
+        for x in (t, u, ip, ok):
+            if x and x in fs:
+                cols.append(x)
+
+        return tuple(cols) if cols else ("__str__",)
+
+    def get_list_filter(self, request):
+        fs = self._fields()
+        ok = self._pick("success", "is_success", "ok", "result")
+        return (ok,) if ok and ok in fs else ()
+
+    def get_search_fields(self, request):
+        fs = self._fields()
+        s = []
+        if "ip_address" in fs:
+            s.append("ip_address")
+        if "ip" in fs:
+            s.append("ip")
+        if "remote_addr" in fs:
+            s.append("remote_addr")
+        if "user" in fs:
+            s.append("user__username")
+        return tuple(s)
+
+    def get_ordering(self, request):
+        fs = self._fields()
+        t = self._pick("timestamp", "created_at", "created", "time", "datetime")
+        return (f"-{t}",) if t and t in fs else ()
