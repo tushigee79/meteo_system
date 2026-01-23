@@ -12,14 +12,13 @@ from inventory.geo.district_lookup import lookup_ub_district
 # ============================================================
 class InstrumentCatalog(models.Model):
     class Kind(models.TextChoices):
-        ETALON = "ETALON", "Эталон"
         WEATHER = "WEATHER", "Цаг уур"
         HYDRO = "HYDRO", "Ус судлал"
-        AGRI = "AGRI", "Хөдөө аж ахуй"
-
-        RADAR = "RADAR", "Радарын станц"
-        AEROLOGY = "AEROLOGY", "Аэрологийн станц"
-        AWS = "AWS", "Цаг уурын автомат станц (AWS)"
+        AWS = "AWS", "AWS"
+        ETALON = "ETALON", "Эталон"
+        RADAR = "RADAR", "Радар"
+        AEROLOGY = "AEROLOGY", "Аэрологи"
+        AGRO = "AGRO", "Хөдөө аж ахуй"
         OTHER = "OTHER", "Бусад"
 
     kind = models.CharField(
@@ -83,7 +82,6 @@ class SumDuureg(models.Model):
     is_ub_district = models.BooleanField(default=False, verbose_name="УБ-ын 9 дүүрэг үү?")
 
     def __str__(self):
-        # ✅ хүссэн форматаар
         return f"{self.aimag} - {self.name}"
 
     class Meta:
@@ -116,16 +114,35 @@ class Organization(models.Model):
 # 3) Байршил
 # ============================================================
 class Location(models.Model):
-    LOCATION_TYPES = [("METEO", "METEO"), ("HYDRO", "HYDRO"), ("AWS", "AWS"), ("OTHER", "Бусад")]
+    # ✅ KIND_CHOICES-той 1:1 тааруулсан
+    LOCATION_TYPES = [
+        ("WEATHER", "Цаг уур"),
+        ("HYDRO", "Ус судлал"),
+        ("AWS", "AWS"),
+        ("ETALON", "Эталон"),
+        ("RADAR", "Радар"),
+        ("AEROLOGY", "Аэрологи"),
+        ("AGRO", "Хөдөө аж ахуй"),
+        ("OTHER", "Бусад"),
+    ]
 
     name = models.CharField(max_length=255, verbose_name="Нэр")
-    location_type = models.CharField(max_length=20, choices=LOCATION_TYPES, default="METEO", verbose_name="Төрөл")
+
+    location_type = models.CharField(
+        max_length=20,
+        choices=LOCATION_TYPES,
+        default="WEATHER",
+        verbose_name="Байршлын төрөл",
+    )
+
     aimag_ref = models.ForeignKey(Aimag, on_delete=models.CASCADE, verbose_name="Аймаг")
     sum_ref = models.ForeignKey(SumDuureg, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Сум/Дүүрэг")
+
     wmo_index = models.CharField(max_length=10, null=True, blank=True, verbose_name="WMO индекс")
     latitude = models.FloatField(null=True, blank=True, verbose_name="Өргөрөг")
     longitude = models.FloatField(null=True, blank=True, verbose_name="Уртраг")
 
+    # ✅ УБ дотор бол координатаар дүүрэг автоматаар бөглөнө
     district_name = models.CharField(max_length=100, blank=True, default="", verbose_name="УБ дүүрэг")
 
     owner_org = models.ForeignKey(
@@ -164,14 +181,13 @@ class Location(models.Model):
 # ============================================================
 class Device(models.Model):
     class Kind(models.TextChoices):
-        ETALON = InstrumentCatalog.Kind.ETALON, "Эталон"
         WEATHER = InstrumentCatalog.Kind.WEATHER, "Цаг уур"
         HYDRO = InstrumentCatalog.Kind.HYDRO, "Ус судлал"
-        AGRI = InstrumentCatalog.Kind.AGRI, "Хөдөө аж ахуй"
-
-        RADAR = InstrumentCatalog.Kind.RADAR, "Радарын станц"
-        AEROLOGY = InstrumentCatalog.Kind.AEROLOGY, "Аэрологийн станц"
-        AWS = InstrumentCatalog.Kind.AWS, "Цаг уурын автомат станц (AWS)"
+        AWS = InstrumentCatalog.Kind.AWS, "AWS"
+        ETALON = InstrumentCatalog.Kind.ETALON, "Эталон"
+        RADAR = InstrumentCatalog.Kind.RADAR, "Радар"
+        AEROLOGY = InstrumentCatalog.Kind.AEROLOGY, "Аэрологи"
+        AGRO = InstrumentCatalog.Kind.AGRO, "Хөдөө аж ахуй"
         OTHER = InstrumentCatalog.Kind.OTHER, "Бусад"
 
     STATUS_CHOICES = [
@@ -219,6 +235,7 @@ class Device(models.Model):
         # Каталог сонгосон бол төрөл нь таарах ёстой
         if self.catalog_item and self.catalog_item.kind != self.kind:
             raise ValidationError({"catalog_item": "Каталогийн төрөл таарахгүй байна."})
+
         # OTHER сонгосон бол нэр заавал
         if self.kind == self.Kind.OTHER and not (self.other_name or "").strip():
             raise ValidationError({"other_name": "“Бусад” сонгосон бол нэр заавал бөглөнө."})
@@ -228,7 +245,6 @@ class Device(models.Model):
         return f"{self.serial_number} - {name}"
 
     class Meta:
-        # ✅ Optional нэршлийн засвар
         verbose_name = "Хэмжих хэрэгсэл"
         verbose_name_plural = "Хэмжих хэрэгсэл"
 
