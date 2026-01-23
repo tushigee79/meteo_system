@@ -30,3 +30,7 @@ staticfiles/
 .DS_Store
 Thumbs.db
 staticfiles/
+# local backups / exports
+*.zip
+inventory/templates/admin/inventory/instrumentcatalog__DISABLED/
+
