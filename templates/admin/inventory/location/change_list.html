@@ -5,6 +5,7 @@
   {{ block.super }}
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="{% static 'inventory/js/admin/location_changelist_cascade.js' %}"></script>
   <style>
     #top-map { height: 500px; border-radius: 10px; margin: 14px 0; }
     .leaflet-container { font: inherit; }
@@ -22,7 +23,84 @@
 {% endblock %}
 
 {% block content %}
+  <div style="margin: 10px 0 14px 0;">
+    <form id="loc-filter-form" method="get" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      {# Preserve search query and other params not in our controls #}
+      {% for key, value in request.GET.items %}
+        {% if key != "location_type" and key != "aimag" and key != "sum" and key != "owner" and key != "q" %}
+          <input type="hidden" name="{{ key }}" value="{{ value }}">
+        {% endif %}
+      {% endfor %}
+
+      {# Байршлын төрөл #}
+      <select id="filter_type" name="location_type" style="min-width:180px;">
+        <option value="">Байршлын төрөл (бүгд)</option>
+        {% if LOCATION_TYPE_CHOICES %}
+          {% for k,l in LOCATION_TYPE_CHOICES %}
+            <option value="{{ k }}" {% if request.GET.location_type == k %}selected{% endif %}>{{ l }}</option>
+          {% endfor %}
+        {% else %}
+          <option value="WEATHER" {% if request.GET.location_type == "WEATHER" %}selected{% endif %}>Цаг уур</option>
+          <option value="HYDRO" {% if request.GET.location_type == "HYDRO" %}selected{% endif %}>Ус судлал</option>
+          <option value="AWS" {% if request.GET.location_type == "AWS" %}selected{% endif %}>AWS</option>
+          <option value="ETALON" {% if request.GET.location_type == "ETALON" %}selected{% endif %}>Эталон</option>
+          <option value="RADAR" {% if request.GET.location_type == "RADAR" %}selected{% endif %}>Радар</option>
+          <option value="AEROLOGY" {% if request.GET.location_type == "AEROLOGY" %}selected{% endif %}>Аэрологи</option>
+          <option value="AGRO" {% if request.GET.location_type == "AGRO" %}selected{% endif %}>Хөдөө аж ахуй</option>
+          <option value="OTHER" {% if request.GET.location_type == "OTHER" %}selected{% endif %}>Бусад</option>
+        {% endif %}
+      </select>
+
+      {# Аймаг/Нийслэл #}
+      {% if aimag_choices %}
+        <select id="filter_aimag" name="aimag" style="min-width:180px;">
+          <option value="">Аймаг/Нийслэл (бүгд)</option>
+          {% for a in aimag_choices %}
+            <option value="{{ a.id }}" {% if request.GET.aimag == a.id|stringformat:"s" %}selected{% endif %}>{{ a.name }}</option>
+          {% endfor %}
+        </select>
+      {% else %}
+        <select id="filter_aimag" name="aimag" style="min-width:180px;">
+          <option value="">Аймаг/Нийслэл</option>
+        </select>
+      {% endif %}
+
+      {# Сум/Дүүрэг #}
+      {% if sum_choices %}
+        <select id="filter_sum" name="sum" style="min-width:220px;">
+          <option value="">Сум/Дүүрэг (бүгд)</option>
+          {% for s in sum_choices %}
+            <option value="{{ s.id }}" {% if request.GET.sum == s.id|stringformat:"s" %}selected{% endif %}>{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      {% else %}
+        <select id="filter_sum" name="sum" style="min-width:220px;">
+          <option value="">Сум/Дүүрэг</option>
+        </select>
+      {% endif %}
+
+      {# Эзэмшигч байгууллага (optional) #}
+      {% if owner_choices %}
+        <select id="filter_owner" name="owner" style="min-width:220px;">
+          <option value="">Эзэмшигч (бүгд)</option>
+          {% for o in owner_choices %}
+            <option value="{{ o.id }}" {% if request.GET.owner == o.id|stringformat:"s" %}selected{% endif %}>{{ o.name }}</option>
+          {% endfor %}
+        </select>
+      {% else %}
+        <select id="filter_owner" name="owner" style="min-width:220px;">
+          <option value="">Эзэмшигч</option>
+        </select>
+      {% endif %}
+
+      <input type="search" name="q" placeholder="Хайх..." value="{{ request.GET.q|default_if_none:'' }}" style="min-width:220px; padding:6px 8px;">
+
+      <a class="button" href="." style="text-decoration:none;">Reset</a>
+    </form>
+  </div>
+
   <div id="top-map"></div>
+
 
   <script id="locations-data" type="application/json">{{ locations_json|safe }}</script>
 
@@ -38,13 +116,30 @@
         attribution: "&copy; OpenStreetMap"
       }).addTo(map);
 
+
+      const TYPE_STYLE = {
+        WEATHER:  { color: "#1f77b4", label: "Цаг уур" },
+        HYDRO:    { color: "#17becf", label: "Ус судлал" },
+        AWS:      { color: "#2ca02c", label: "AWS" },
+        ETALON:   { color: "#9467bd", label: "Эталон" },
+        RADAR:    { color: "#d62728", label: "Радар" },
+        AEROLOGY: { color: "#ff7f0e", label: "Аэрологи" },
+        AGRO:     { color: "#8c564b", label: "Хөдөө аж ахуй" },
+        OTHER:    { color: "#7f7f7f", label: "Бусад" },
+      };
+
+      function styleByType(t) {
+        const s = TYPE_STYLE[t] || TYPE_STYLE.OTHER;
+        return { radius: 6, weight: 2, color: s.color, fillColor: s.color, fillOpacity: 0.9 };
+      }
+
       const bounds = [];
       DATA.forEach((x) => {
         if (!x || x.lat == null || x.lon == null) return;
         const m = L.marker([x.lat, x.lon]).addTo(map);
         const title = (x.name || "Байршил");
         const meta = [
-          x.location_type ? ("Төрөл: " + x.location_type) : "",
+          x.location_type ? ("Төрөл: " + (TYPE_STYLE[(x.location_type||'').toUpperCase()]?.label || x.location_type)) : "",
           x.aimag ? ("Аймаг: " + x.aimag) : "",
           x.sum ? ("Сум/Дүүрэг: " + x.sum) : "",
           x.wmo ? ("WMO: " + x.wmo) : ""

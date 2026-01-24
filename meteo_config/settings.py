@@ -60,7 +60,7 @@ TIME_ZONE = 'Asia/Ulaanbaatar'
 USE_I18N = True
 USE_TZ = True
 
-# Password policy
+# ✅ Password policy (production-ready)
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 10}},
@@ -71,23 +71,18 @@ AUTH_PASSWORD_VALIDATORS = [
 LOGIN_URL = "/django-admin/login/"
 LOGIN_REDIRECT_URL = "/django-admin/"
 
-# =========================
-# Static & Media (FINAL)
-# =========================
 STATIC_URL = "/static/"
-
 STATICFILES_DIRS = [
     BASE_DIR / "static",
+    BASE_DIR / "inventory" / "static",
 ]
-
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
-# =========================
-# Jazzmin
-# =========================
+# settings.py
+
 JAZZMIN_SETTINGS = {
     "site_title": "NAMEM Багаж Хяналт",
     "site_header": "NAMEM",
@@ -97,8 +92,10 @@ JAZZMIN_SETTINGS = {
     "show_sidebar": True,
     "navigation_expanded": True,
 
+    # ✅ FIX: leading "/" заавал хэрэгтэй
     "base_url": "/django-admin/",
 
+    # (Чиний байгаа custom js хэвээр)
     "custom_js": "js/admin_sidebar_link.js",
 
     "use_google_fonts": True,
@@ -109,13 +106,15 @@ JAZZMIN_SETTINGS = {
         "inventory.SparePartOrder": "fas fa-shopping-cart",
     },
 
+    # ✅ NEW: Sidebar дээр Dashboard 2 линк
     "custom_links": {
         "Inventory": [
             {"name": "Dashboard (Хүснэгт)", "url": "/admin/dashboard/table/", "icon": "fas fa-table"},
-            {"name": "Dashboard (График)", "url": "/admin/dashboard/graph/", "icon": "fas fa-chart-bar"},
+            {"name": "Dashboard (График)",  "url": "/admin/dashboard/graph/", "icon": "fas fa-chart-bar"},
         ]
     },
 
+    # Чиний top links хэвээр
     "custom_links_top": [
         {
             "name": "Админ хэсэг",
