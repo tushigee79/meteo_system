@@ -1,3 +1,4 @@
+# inventory/models.py
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -11,51 +12,49 @@ from inventory.geo.district_lookup import lookup_ub_district
 # 1) ДЦУБ КАТАЛОГ (Лавлах сан)
 # ============================================================
 class InstrumentCatalog(models.Model):
-    class Kind(models.TextChoices):
-        WEATHER = "WEATHER", "Цаг уур"
-        HYDRO = "HYDRO", "Ус судлал"
-        AWS = "AWS", "AWS"
-        ETALON = "ETALON", "Эталон"
-        RADAR = "RADAR", "Радар"
-        AEROLOGY = "AEROLOGY", "Аэрологи"
-        AGRO = "AGRO", "Хөдөө аж ахуй"
-        OTHER = "OTHER", "Бусад"
+    KIND_CHOICES = [
+        ("WEATHER", "Цаг уур"),
+        ("HYDRO", "Ус судлал"),
+        ("AWS", "AWS"),
+        ("RADAR", "Радар"),
+        ("AEROLOGY", "Аэрологи"),
+        ("AGRO", "ХАА"),
+        ("ETALON", "Эталон"),
+        ("OTHER", "Бусад"),
+    ]
 
     kind = models.CharField(
         max_length=20,
-        choices=Kind.choices,
-        default=Kind.WEATHER,
+        choices=KIND_CHOICES,
+        default="OTHER",
         verbose_name="Төрөл",
     )
 
     code = models.CharField(
-        max_length=50,
-        blank=True,
-        default="",
-        help_text="ДЦУБ дотоод код",
+        max_length=100,
+        unique=True,
         verbose_name="Код",
     )
 
-    name_mn = models.CharField(max_length=255, verbose_name="Нэр (Монгол)")
+    name_mn = models.CharField(max_length=255, verbose_name="Нэр")
 
     unit = models.CharField(
         max_length=50,
         blank=True,
         default="",
-        verbose_name="Хэмжих нэгж",
+        verbose_name="Нэгж",
     )
 
-    is_active = models.BooleanField(default=True, verbose_name="Идэвхтэй")
-    sort_order = models.PositiveIntegerField(default=0, verbose_name="Эрэмбэ")
+    is_active = models.BooleanField(default=True)
+    sort_order = models.IntegerField(default=0)
 
     class Meta:
         verbose_name = "ДЦУБ Каталог"
         verbose_name_plural = "ДЦУБ Каталог"
-        ordering = ["sort_order", "kind", "name_mn"]
-        unique_together = [("kind", "name_mn")]
+        ordering = ["sort_order", "code"]
 
     def __str__(self):
-        return f"{self.get_kind_display()}: {self.name_mn}"
+        return f"{self.code} – {self.name_mn}"
 
 
 # ============================================================
@@ -78,7 +77,6 @@ class SumDuureg(models.Model):
     aimag = models.ForeignKey(Aimag, on_delete=models.CASCADE, related_name="sums")
     code = models.CharField(max_length=20, blank=True, default="", verbose_name="Код")
 
-    # ✅ УБ-ын 9 дүүргийг DB түвшинд ялгах флаг
     is_ub_district = models.BooleanField(default=False, verbose_name="УБ-ын 9 дүүрэг үү?")
 
     def __str__(self):
@@ -114,7 +112,6 @@ class Organization(models.Model):
 # 3) Байршил
 # ============================================================
 class Location(models.Model):
-    # ✅ KIND_CHOICES-той 1:1 тааруулсан
     LOCATION_TYPES = [
         ("WEATHER", "Цаг уур"),
         ("HYDRO", "Ус судлал"),
@@ -142,7 +139,6 @@ class Location(models.Model):
     latitude = models.FloatField(null=True, blank=True, verbose_name="Өргөрөг")
     longitude = models.FloatField(null=True, blank=True, verbose_name="Уртраг")
 
-    # ✅ УБ дотор бол координатаар дүүрэг автоматаар бөглөнө
     district_name = models.CharField(max_length=100, blank=True, default="", verbose_name="УБ дүүрэг")
 
     owner_org = models.ForeignKey(
@@ -181,14 +177,14 @@ class Location(models.Model):
 # ============================================================
 class Device(models.Model):
     class Kind(models.TextChoices):
-        WEATHER = InstrumentCatalog.Kind.WEATHER, "Цаг уур"
-        HYDRO = InstrumentCatalog.Kind.HYDRO, "Ус судлал"
-        AWS = InstrumentCatalog.Kind.AWS, "AWS"
-        ETALON = InstrumentCatalog.Kind.ETALON, "Эталон"
-        RADAR = InstrumentCatalog.Kind.RADAR, "Радар"
-        AEROLOGY = InstrumentCatalog.Kind.AEROLOGY, "Аэрологи"
-        AGRO = InstrumentCatalog.Kind.AGRO, "Хөдөө аж ахуй"
-        OTHER = InstrumentCatalog.Kind.OTHER, "Бусад"
+        WEATHER = "WEATHER", "Цаг уур"
+        HYDRO = "HYDRO", "Ус судлал"
+        AWS = "AWS", "AWS"
+        ETALON = "ETALON", "Эталон"
+        RADAR = "RADAR", "Радар"
+        AEROLOGY = "AEROLOGY", "Аэрологи"
+        AGRO = "AGRO", "Хөдөө аж ахуй"
+        OTHER = "OTHER", "Бусад"
 
     STATUS_CHOICES = [
         ("Active", "Ашиглагдаж буй"),
@@ -232,11 +228,9 @@ class Device(models.Model):
     lifespan_years = models.PositiveIntegerField(default=10, verbose_name="Ашиглалтын хугацаа (жил)")
 
     def clean(self):
-        # Каталог сонгосон бол төрөл нь таарах ёстой
         if self.catalog_item and self.catalog_item.kind != self.kind:
             raise ValidationError({"catalog_item": "Каталогийн төрөл таарахгүй байна."})
 
-        # OTHER сонгосон бол нэр заавал
         if self.kind == self.Kind.OTHER and not (self.other_name or "").strip():
             raise ValidationError({"other_name": "“Бусад” сонгосон бол нэр заавал бөглөнө."})
 
@@ -250,7 +244,185 @@ class Device(models.Model):
 
 
 # ============================================================
-# 6) Сэлбэг захиалга
+# 5) Засвар, үйлчилгээ  ✅ ШИНЭ
+# ============================================================
+class MaintenanceService(models.Model):
+    """
+    Засвар, үйлчилгээ
+    """
+    PERFORMER_TYPES = [
+        ("ENGINEER", "Инженер"),
+        ("ORG", "Байгууллага"),
+    ]
+
+    REASONS = [
+        ("NORMAL", "Хэвийн засвар үйлчилгээ"),
+        ("LIMITED", "Хязгаарлагдмал ажиллагаа"),
+        ("NOT_WORKING", "Ажиллагаагүй болсон"),
+    ]
+
+    device = models.ForeignKey(
+        "inventory.Device",
+        on_delete=models.PROTECT,
+        related_name="maintenance_services",
+        verbose_name="Багаж / Төхөөрөмж",
+    )
+    date = models.DateField(verbose_name="Огноо")
+
+    reason = models.CharField(
+        max_length=20,
+        choices=REASONS,
+        default="NORMAL",
+        verbose_name="Засвар хийсэн шалтгаан",
+    )
+
+    performer_type = models.CharField(
+        max_length=10,
+        choices=PERFORMER_TYPES,
+        default="ENGINEER",
+        verbose_name="Хийсэн этгээд (төрөл)",
+    )
+    performer_engineer_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name="Хийсэн инженер (нэр)",
+    )
+    performer_org_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name="Хийсэн байгууллага (нэр)",
+    )
+
+    evidence = models.FileField(
+        upload_to="evidence/maintenance/%Y/%m/",
+        blank=True,
+        null=True,
+        verbose_name="Нотлох баримт (файл)",
+    )
+
+    note = models.TextField(blank=True, default="", verbose_name="Тайлбар / тэмдэглэл")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Засвар, үйлчилгээ"
+        verbose_name_plural = "Засвар, үйлчилгээ"
+        ordering = ["-date", "-id"]
+
+    def __str__(self):
+        return f"{self.device} - {self.get_reason_display()} ({self.date})"
+
+    def clean(self):
+        super().clean()
+
+        eng = (self.performer_engineer_name or "").strip()
+        org = (self.performer_org_name or "").strip()
+
+        if self.performer_type == "ENGINEER":
+            if not eng:
+                raise ValidationError({"performer_engineer_name": "Инженерийн нэр заавал."})
+            if org:
+                raise ValidationError({"performer_org_name": "Инженер сонгосон үед байгууллага бөглөхгүй."})
+
+        if self.performer_type == "ORG":
+            if not org:
+                raise ValidationError({"performer_org_name": "Байгууллагын нэр заавал."})
+            if eng:
+                raise ValidationError({"performer_engineer_name": "Байгууллага сонгосон үед инженер бөглөхгүй."})
+
+
+# ============================================================
+# 6) Хяналт, тохируулга  ✅ ШИНЭ
+# ============================================================
+class ControlAdjustment(models.Model):
+    """
+    Хяналт, тохируулга
+    """
+    PERFORMER_TYPES = [
+        ("ENGINEER", "Инженер"),
+        ("ORG", "Байгууллага"),
+    ]
+
+    RESULTS = [
+        ("PASS", "PASS - Хэвийн"),
+        ("LIMITED", "Хязгаарлагдмал"),
+        ("FAIL", "FAIL - Ажиллагаагүй"),
+    ]
+
+    device = models.ForeignKey(
+        "inventory.Device",
+        on_delete=models.PROTECT,
+        related_name="control_adjustments",
+        verbose_name="Багаж / Төхөөрөмж",
+    )
+    date = models.DateField(verbose_name="Огноо")
+
+    result = models.CharField(
+        max_length=20,
+        choices=RESULTS,
+        default="PASS",
+        verbose_name="Үр дүн",
+    )
+
+    performer_type = models.CharField(
+        max_length=10,
+        choices=PERFORMER_TYPES,
+        default="ENGINEER",
+        verbose_name="Хийсэн этгээд (төрөл)",
+    )
+    performer_engineer_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name="Хийсэн инженер (нэр)",
+    )
+    performer_org_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name="Хийсэн байгууллага (нэр)",
+    )
+
+    evidence = models.FileField(
+        upload_to="evidence/control/%Y/%m/",
+        blank=True,
+        null=True,
+        verbose_name="Нотлох баримт (файл)",
+    )
+
+    note = models.TextField(blank=True, default="", verbose_name="Тайлбар / тэмдэглэл")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Хяналт, тохируулга"
+        verbose_name_plural = "Хяналт, тохируулга"
+        ordering = ["-date", "-id"]
+
+    def __str__(self):
+        return f"{self.device} - {self.get_result_display()} ({self.date})"
+
+    def clean(self):
+        super().clean()
+
+        eng = (self.performer_engineer_name or "").strip()
+        org = (self.performer_org_name or "").strip()
+
+        if self.performer_type == "ENGINEER":
+            if not eng:
+                raise ValidationError({"performer_engineer_name": "Инженерийн нэр заавал."})
+            if org:
+                raise ValidationError({"performer_org_name": "Инженер сонгосон үед байгууллага бөглөхгүй."})
+
+        if self.performer_type == "ORG":
+            if not org:
+                raise ValidationError({"performer_org_name": "Байгууллагын нэр заавал."})
+            if eng:
+                raise ValidationError({"performer_engineer_name": "Байгууллага сонгосон үед инженер бөглөхгүй."})
+
+
+# ============================================================
+# 7) Сэлбэг захиалга
 # ============================================================
 class SparePartOrder(models.Model):
     order_no = models.CharField(max_length=20, unique=True, verbose_name="Захиалгын №")
@@ -269,7 +441,7 @@ class SparePartItem(models.Model):
 
 
 # ============================================================
-# 7) User Profile
+# 8) User Profile
 # ============================================================
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
@@ -284,7 +456,7 @@ class UserProfile(models.Model):
 
 
 # ============================================================
-# 8) Auth Audit Log
+# 9) Auth Audit Log
 # ============================================================
 class AuthAuditLog(models.Model):
     ACTION_CHOICES = [

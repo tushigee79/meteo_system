@@ -6,23 +6,11 @@
   <script src="{% static 'inventory/js/admin/changelist_auto_submit.js' %}"></script>
 {% endblock %}
 
-{% block object-tools-items %}
-  <li>
-    <a class="addlink" style="background-color:#28a745; color:white;"
-       href="export-csv/">
-      📥 Template татах
-    </a>
-  </li>
-  {{ block.super }}
-{% endblock %}
-
-{# Хэрвээ чи өөрийн custom filter bar хийсэн бол энэ хэсэгт байрладаг. #}
 {% block search %}
   {{ block.super }}
 
   <div style="margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
-    <form id="dev-filter-form" method="get" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-      {# Preserve existing GET params except our controls #}
+    <form id="cat-filter-form" method="get" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       {% for key, value in request.GET.items %}
         {% if key != "kind" and key != "q" %}
           <input type="hidden" name="{{ key }}" value="{{ value }}">
@@ -58,7 +46,7 @@
   <script>
     (function () {
       const el = document.getElementById("filter_kind");
-      const form = document.getElementById("dev-filter-form");
+      const form = document.getElementById("cat-filter-form");
       if (el && form) el.addEventListener("change", function(){ form.submit(); });
     })();
   </script>

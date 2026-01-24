@@ -32,10 +32,41 @@
     }
     .hint { margin-top: 8px; font-size: 12px; color: #666; line-height: 1.35; }
 
-    .legend {
-      margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap;
-      font-size: 12px; color: #444;
+    /* Legend controls */
+    .legend-controls{
+      display:flex;
+      gap:6px;
+      margin-top: 10px;
     }
+    .legend-controls button{
+      font-size:11px;
+      padding:3px 8px;
+      border-radius:999px;
+      border:1px solid #d0d0d0;
+      background:#fff;
+      cursor:pointer;
+      font-weight:600;
+    }
+    .legend-controls button:hover{ background:#f3f6fb; }
+
+    /* Legend */
+    .legend {
+      margin-top: 8px;
+      display: flex; gap: 10px; flex-wrap: wrap;
+      font-size: 12px; color: #444;
+      user-select: none;
+    }
+    .legend-item {
+      display: inline-flex; align-items: center;
+      cursor: pointer;
+      padding: 3px 6px;
+      border-radius: 999px;
+      border: 1px solid #e6e6e6;
+      background: #fff;
+      transition: .15s ease;
+    }
+    .legend-item:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.08); }
+    .legend-item.inactive { opacity: 0.35; text-decoration: line-through; filter: grayscale(1); }
     .dot {
       width: 10px; height: 10px; border-radius: 50%;
       display: inline-block; margin-right: 6px;
@@ -72,13 +103,14 @@
       <input id="q" type="text" placeholder="Нэр / Аймаг / Төрөлөөр хайх…" autocomplete="off">
       <button id="clearBtn" type="button">Цэвэрлэх</button>
     </div>
-    <div class="hint">Жагсаалтаас дарвал цэг дээр очоод багажийн тоо гарна.</div>
+    <div class="hint">Legend дээр дарж төрлүүдийг ON/OFF хийгээд, жагсаалтаас дарвал цэг дээр очоод багажийн тоо гарна.</div>
 
-    <div class="legend" aria-label="legend">
-      <span><span class="dot" style="background:#2f80ed"></span>Meteo</span>
-      <span><span class="dot" style="background:#27ae60"></span>Hydro</span>
-      <span><span class="dot" style="background:#f2994a"></span>AWS</span>
+    <div class="legend-controls">
+      <button type="button" id="legendOn">Бүгд ON</button>
+      <button type="button" id="legendOff">Бүгд OFF</button>
     </div>
+
+    <div class="legend" id="legend" aria-label="legend"></div>
 
     <div class="results" id="results"></div>
   </div>
@@ -92,7 +124,6 @@
         return;
       }
 
-      // --- DATA parse ---
       let DATA = [];
       try {
         const raw = document.getElementById("locations-data").textContent || "[]";
@@ -102,7 +133,6 @@
         DATA = [];
       }
 
-      // --- Map init ---
       const map = L.map("map", { zoomControl: true }).setView([46.8625, 103.8467], 5);
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 18,
@@ -112,13 +142,27 @@
 
       const safe = (v) => (v === null || v === undefined ? "" : String(v));
 
-      function normType(t) { return safe(t).trim().toUpperCase(); }
-      function colorByType(t) {
-        const T = normType(t);
-        if (T.includes("HYDRO")) return "#27ae60";
-        if (T.includes("AWS")) return "#f2994a";
-        return "#2f80ed";
+      const typeMeta = {
+        WEATHER:  { label: "🌦 Цаг уур",        color: "#2f80ed" },
+        HYDRO:    { label: "💧 Ус судлал",     color: "#27ae60" },
+        AWS:      { label: "📟 AWS",           color: "#f2994a" },
+        ETALON:   { label: "🧪 Эталон",        color: "#9b51e0" },
+        RADAR:    { label: "📡 Радар",         color: "#eb5757" },
+        AEROLOGY: { label: "🎈 Аэрологи",      color: "#56ccf2" },
+        AGRO:     { label: "🌱 Хөдөө аж ахуй", color: "#6fcf97" },
+        OTHER:    { label: "📦 Бусад",         color: "#828282" },
+      };
+
+      const activeTypes = Object.fromEntries(Object.keys(typeMeta).map(k => [k, true]));
+
+      function normTypeKey(t) {
+        const T = safe(t).trim().toUpperCase();
+        if (T === "METEO") return "WEATHER";
+        return typeMeta[T] ? T : "OTHER";
       }
+      function labelByType(t) { return typeMeta[normTypeKey(t)]?.label || normTypeKey(t); }
+      function colorByType(t) { return typeMeta[normTypeKey(t)]?.color || "#999999"; }
+
       function markerIcon(hex) {
         return L.divIcon({
           className: "",
@@ -135,7 +179,7 @@
             <div style="font-weight:800; font-size:14px; margin-bottom:6px;">${safe(p.name)}</div>
             <div style="font-size:12px; color:#444; line-height:1.5;">
               <div><b>Аймаг:</b> ${safe(p.aimag)}</div>
-              <div><b>Төрөл:</b> ${safe(p.type)}</div>
+              <div><b>Төрөл:</b> ${labelByType(p.type)}</div>
               <div><b>Багажийн тоо:</b> ${safe(p.device_count ?? 0)}</div>
             </div>
           </div>
@@ -171,7 +215,7 @@
       const clearBtn = document.getElementById("clearBtn");
 
       function toKey(p) {
-        return `${safe(p.name)} ${safe(p.aimag)} ${safe(p.type)}`.toLowerCase();
+        return `${safe(p.name)} ${safe(p.aimag)} ${safe(p.type)} ${labelByType(p.type)}`.toLowerCase();
       }
 
       function renderResults(list) {
@@ -184,11 +228,16 @@
         list.slice(0, 100).forEach((p) => {
           const div = document.createElement("div");
           div.className = "item";
+
+          const tKey = normTypeKey(p.type);
+          const tLabel = typeMeta[tKey]?.label || safe(p.type) || "—";
+          const tColor = typeMeta[tKey]?.color || "#999999";
+
           div.innerHTML = `
             <div class="name">${safe(p.name)}</div>
             <div class="meta">
               <span class="pill">${safe(p.aimag) || "—"}</span>
-              <span class="pill">${safe(p.type) || "—"}</span>
+              <span class="pill"><span class="dot" style="background:${tColor}; vertical-align:-1px;"></span>${tLabel}</span>
               <span class="pill">Багаж: ${safe(p.device_count ?? 0)}</span>
             </div>
           `;
@@ -207,15 +256,50 @@
 
       function applyFilter() {
         const term = (q.value || "").trim().toLowerCase();
-        if (!term) {
-          addAllMarkers(DATA, true);
-          renderResults(DATA);
-          return;
-        }
-        const filtered = DATA.filter((p) => toKey(p).includes(term));
+
+        let filtered = DATA.filter((p) => activeTypes[normTypeKey(p.type)]);
+        if (term) filtered = filtered.filter((p) => toKey(p).includes(term));
+
         addAllMarkers(filtered, true);
         renderResults(filtered);
       }
+
+      const legendEl = document.getElementById("legend");
+
+      function buildLegend() {
+        if (!legendEl) return;
+
+        legendEl.innerHTML = "";
+        Object.keys(typeMeta).forEach((k) => {
+          const m = typeMeta[k];
+          const el = document.createElement("span");
+          el.className = "legend-item" + (activeTypes[k] ? "" : " inactive");
+          el.innerHTML = `<span class="dot" style="background:${m.color}"></span>${m.label}`;
+
+          el.addEventListener("click", () => {
+            activeTypes[k] = !activeTypes[k];
+            buildLegend();
+            applyFilter();
+          });
+
+          legendEl.appendChild(el);
+        });
+      }
+
+      const btnOn = document.getElementById("legendOn");
+      const btnOff = document.getElementById("legendOff");
+
+      function setAllTypes(state) {
+        Object.keys(activeTypes).forEach(k => (activeTypes[k] = state));
+        buildLegend();
+        applyFilter();
+      }
+
+      if (btnOn)  btnOn.addEventListener("click", () => setAllTypes(true));
+      if (btnOff) btnOff.addEventListener("click", () => setAllTypes(false));
+
+      buildLegend();
+      applyFilter();
 
       q.addEventListener("input", applyFilter);
       clearBtn.addEventListener("click", () => {
@@ -223,21 +307,6 @@
         applyFilter();
         q.focus();
       });
-
-      // initial
-      applyFilter();
-
-      // 1 цэгийн map дээр автоматаар төвлөрүүлж popup нээх
-      if (DATA.length === 1) {
-        const p = DATA[0];
-        setTimeout(() => {
-          const mk = markersById.get(p.id);
-          if (mk) {
-            map.setView([p.lat, p.lon], 12);
-            mk.openPopup();
-          }
-        }, 500);
-      }
     });
   </script>
 </body>
