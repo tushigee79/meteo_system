@@ -411,6 +411,9 @@ class DeviceAdmin(admin.ModelAdmin):
         "location__name",
         "location__wmo_index",
     )
+
+    # ⚠️ catalog_item дээр autocomplete байвал авч хая (JS populate хийнэ)
+    # autocomplete_fields = ("catalog_item",)  # ❌ байвал устга
     autocomplete_fields = ("location",)
     ordering = ("serial_number",)
 
@@ -442,15 +445,22 @@ class DeviceAdmin(admin.ModelAdmin):
 
     def catalog_by_kind(self, request):
         kind = (request.GET.get("kind") or "").strip()
-        q = (request.GET.get("q") or "").strip()
 
         qs = InstrumentCatalog.objects.all()
+
+        # is_active field байвал л шүүнэ (байхгүй бол эвдэхгүй)
+        try:
+            field_names = {f.name for f in InstrumentCatalog._meta.get_fields()}
+        except Exception:
+            field_names = set()
+
+        if "is_active" in field_names:
+            qs = qs.filter(is_active=True)
+
         if kind:
             qs = qs.filter(kind=kind)
-        if q:
-            qs = qs.filter(Q(name_mn__icontains=q) | Q(code__icontains=q))
 
-        qs = qs.order_by("sort_order", "name_mn")[:200]
+        qs = qs.order_by("sort_order", "name_mn")[:2000]
         return JsonResponse({"results": [{"id": x.id, "text": x.name_mn} for x in qs]})
 
     # ✅ FINAL (aid==1): DeviceAdmin.sums_by_aimag
@@ -531,6 +541,7 @@ class DeviceAdmin(admin.ModelAdmin):
 
     class Media:
         js = (
+            # таны байршлын JS хэвээр байж болно
             "inventory/js/admin/device_kind_filter.js",
             "inventory/js/admin/device_location_cascade.js",
         )
