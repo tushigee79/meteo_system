@@ -34,3 +34,10 @@ staticfiles/
 *.zip
 inventory/templates/admin/inventory/instrumentcatalog__DISABLED/
 
+*.bak
+*.sqlite3
+import_data/
+__untracked_backup__/
+__untracked_hold__/
+
+
