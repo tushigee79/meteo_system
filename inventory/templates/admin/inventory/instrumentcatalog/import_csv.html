@@ -1,0 +1,18 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+
+<h2>📥 InstrumentCatalog CSV импорт</h2>
+
+<form method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+  <p>
+    <input type="file" name="csv_file" accept=".csv" required>
+  </p>
+  <button type="submit" class="default">Импорт хийх</button>
+</form>
+
+<p style="margin-top:10px;color:#666">
+  Шаардлагатай баганууд: code, name_mn, location_type, unit
+</p>
+
+{% endblock %}
