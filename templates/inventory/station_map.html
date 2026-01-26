@@ -1,10 +1,11 @@
+﻿{% load static %}
 <!DOCTYPE html>
 <html>
 <head>
-    <title>{{ station.name }} - Байршил</title>
+    <title>{{ station.name }} - Ð‘Ð°Ð¹Ñ€ÑˆÐ¸Ð»</title>
 
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="{% static 'inventory/vendor/leaflet/leaflet.css' %}" />
+    <script src="{% static 'inventory/vendor/leaflet/leaflet.js' %}"></script>
 
     <style>
         body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
@@ -108,7 +109,7 @@
     legend.onAdd = function () {
         const div = L.DomUtil.create("div", "legend");
         div.innerHTML = `
-            <div style="font-weight:700;margin-bottom:6px;">Legend (8 төрөл)</div>
+            <div style="font-weight:700;margin-bottom:6px;">Legend (8 Ñ‚Ó©Ñ€Ó©Ð»)</div>
             ${Object.keys(TYPE_COLORS).map(k => `
                 <div class="row">
                     <span class="dot" style="background:${TYPE_COLORS[k]}"></span>
@@ -135,3 +136,5 @@
 
 </body>
 </html>
+
+
