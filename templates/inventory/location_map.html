@@ -1,209 +1,480 @@
-<!DOCTYPE html>
-<html lang="mn">
-<head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Байршлын газрын зураг</title>
+{% extends "admin/base_site.html" %}
+{% load static %}
 
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+{# =========================================================
+   Inventory: Location Map (Production Final + Organization filter)
+   Template path:
+     templates/inventory/location_map.html
+   Expects context:
+     locations_json (JSON string; list/dict)
+   ========================================================= #}
 
-    <style>
-        body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background:#f4f7f6; }
-        .hdr { padding: 12px 18px; font-weight: 700; background: #2c3e50; color: white; display: flex; align-items: center; gap: 10px; }
-        #map { height: calc(100vh - 48px); width: 100%; }
+{% block extrahead %}
+{{ block.super }}
 
-        .ctrl {
-            background: white; padding: 15px; border-radius: 10px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.15); font-size: 13px; min-width: 240px;
-        }
-        .ctrl label { display:block; font-weight: 700; margin-bottom: 5px; color: #34495e; }
-        .ctrl select, .ctrl input { 
-            width: 100%; margin-bottom: 12px; padding: 8px; 
-            border: 1px solid #dcdde1; border-radius: 5px; box-sizing: border-box; 
-        }
+<link rel="stylesheet" href="{% static 'inventory/vendor/leaflet/leaflet.css' %}">
+<script src="{% static 'inventory/vendor/leaflet/leaflet.js' %}"></script>
 
-        .legend {
-            background: white; padding: 12px; border-radius: 10px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.15); line-height: 26px; color: #2f3640;
-        }
-        .legend b { display: block; margin-bottom: 8px; border-bottom: 1px solid #f1f2f6; padding-bottom: 5px; }
-        .legend-item { 
-            cursor: pointer; padding: 4px 8px; border-radius: 5px; 
-            transition: all 0.2s; display: flex; align-items: center;
-        }
-        .legend-item:hover { background: #f1f2f6; }
-        .legend-item.inactive { opacity: 0.3; text-decoration: line-through; filter: grayscale(1); }
-        .dot { 
-            height: 12px; width: 12px; border-radius: 50%; 
-            display: inline-block; margin-right: 10px; border: 1px solid white;
-        }
-    </style>
-</head>
-<body>
+<link rel="stylesheet" href="{% static 'inventory/vendor/leaflet.markercluster/MarkerCluster.css' %}">
+<link rel="stylesheet" href="{% static 'inventory/vendor/leaflet.markercluster/MarkerCluster.Default.css' %}">
+<script src="{% static 'inventory/vendor/leaflet.markercluster/leaflet.markercluster.js' %}"></script>
 
-<div class="hdr">📡 Станцуудын байршил (Байгууллагаар шүүх)</div>
-<div id="map"></div>
+<script src="{% static 'inventory/js/tile_layer_fix.js' %}"></script>
 
-<script id="locations-data" type="application/json">{{ locations_json|safe }}</script>
+<style>
+  .locmap-page { width: 100%; }
+  .locmap-page, .locmap-page .container, .locmap-page .container-fluid{
+    width: 100% !important; max-width: none !important;
+  }
+
+  .locmap-shell{
+    height: calc(100vh - 155px);
+    min-height: 720px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .locmap-title{
+    margin: 0;
+    padding: 0;
+    font-size: 28px;
+    font-weight: 800;
+    display:flex;
+    align-items:center;
+    gap: 10px;
+  }
+
+  #locmap{
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    min-height: 640px;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid rgba(0,0,0,.08);
+    background: #f6f7f9;
+  }
+
+  .locmap-panel{
+    position: absolute;
+    left: 14px;
+    top: 78px;
+    width: 330px;
+    max-width: 44vw;
+    background: rgba(255,255,255,.96);
+    border: 1px solid rgba(0,0,0,.08);
+    border-radius: 14px;
+    box-shadow: 0 10px 28px rgba(0,0,0,.14);
+    padding: 12px;
+    z-index: 900;
+    backdrop-filter: blur(6px);
+  }
+
+  .locmap-panel label{
+    display:block;
+    font-size: 12px;
+    margin: 10px 0 4px;
+    opacity: .8;
+  }
+
+  .locmap-panel select,
+  .locmap-panel input{
+    width: 100%;
+    border: 1px solid rgba(0,0,0,.15);
+    border-radius: 10px;
+    padding: 8px 10px;
+    outline: none;
+    background: #fff;
+  }
+
+  .locmap-row{ display:flex; gap:10px; }
+  .locmap-row > div{ flex: 1; }
+
+  .locmap-btn{
+    margin-top: 10px;
+    width: 100%;
+    border: 0;
+    border-radius: 10px;
+    padding: 9px 10px;
+    cursor: pointer;
+    background: #2d6cdf;
+    color: #fff;
+    font-weight: 700;
+  }
+
+  .locmap-muted{ margin-top: 8px; font-size: 12px; opacity: .75; }
+
+  .legend{
+    margin-top: 12px;
+    border-top: 1px dashed rgba(0,0,0,.15);
+    padding-top: 10px;
+  }
+  .legend-title{ font-weight: 800; font-size: 12px; margin-bottom: 6px; }
+
+  .legend-item{
+    display:flex;
+    align-items:center;
+    gap: 8px;
+    font-size: 12px;
+    padding: 6px 8px;
+    border-radius: 10px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .legend-item:hover{ background: rgba(0,0,0,.04); }
+  .legend-item.inactive{ opacity: .35; }
+
+  .dot{
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid rgba(0,0,0,.15);
+    display:inline-block;
+    flex: 0 0 10px;
+  }
+
+  .leaflet-control-attribution{ font-size: 11px; opacity: .8; }
+  .leaflet-popup-content{ margin: 10px 12px; }
+  .leaflet-popup-content-wrapper{ border-radius: 12px; }
+
+  @media (max-width: 900px){
+    .locmap-shell{ height: calc(100vh - 125px); min-height: 640px; }
+    .locmap-panel{
+      left: 12px;
+      right: 12px;
+      width: auto;
+      max-width: none;
+      top: 66px;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+</div></div></div>  {# close admin content grid wrappers #}
+
+<div class="locmap-shell" style="margin-left:0;">
+  <h1 class="locmap-title">📍 Станцуудын байршил</h1>
+
+  <div style="position:relative; flex:1;">
+    <div id="locmap"></div>
+
+    <script id="locations-data" type="application/json">{{ locations_json|safe }}</script>
+
+      <div class="locmap-panel" id="panel">
+        <div class="locmap-row">
+          <div>
+            <label for="aimagFilter">Аймаг</label>
+            <select id="aimagFilter">
+              <option value="ALL">Бүгд</option>
+            </select>
+          </div>
+          <div>
+            <label for="typeFilter">Төрөл</label>
+            <select id="typeFilter">
+              <option value="ALL">Бүгд</option>
+              <option value="WEATHER">🌦 Цаг уур</option>
+              <option value="AWS">🛰 AWS</option>
+              <option value="HYDRO">💧 Ус судлал</option>
+              <option value="AEROLOGY">🎈 Аэрологи</option>
+              <option value="AGRO">🌱 ХАА/Agro</option>
+              <option value="ETALON">🧪 Эталон</option>
+              <option value="RADAR">📡 Радар</option>
+              <option value="OTHER">⚙️ Бусад</option>
+            </select>
+          </div>
+        </div>
+
+        <label for="orgFilter">Байгууллага</label>
+        <select id="orgFilter">
+          <option value="ALL">Бүгд</option>
+        </select>
+
+        <label for="nameSearch">Станцын нэр (хайх)</label>
+        <input id="nameSearch" type="text" placeholder="Хайх..." />
+
+        <button class="locmap-btn" id="clearBtn" type="button">↺ Шүүлтүүр цэвэрлэх</button>
+        <div class="locmap-muted" id="countLbl">Харагдаж буй: 0 / 0</div>
+
+        <div class="legend" id="legendType">
+          <div class="legend-title">Станцын төрөл (toggle)</div>
+          <div class="legend-item" data-type="WEATHER"><span class="dot" style="background:#4b3bff;"></span> 🌦 Цаг уур</div>
+          <div class="legend-item" data-type="AWS"><span class="dot" style="background:#f2b233;"></span> 🛰 AWS</div>
+          <div class="legend-item" data-type="HYDRO"><span class="dot" style="background:#1f8f3a;"></span> 💧 Ус судлал</div>
+          <div class="legend-item" data-type="AEROLOGY"><span class="dot" style="background:#a000c8;"></span> 🎈 Аэрологи</div>
+          <div class="legend-item" data-type="AGRO"><span class="dot" style="background:#6a5a2a;"></span> 🌱 ХАА/Agro</div>
+          <div class="legend-item" data-type="ETALON"><span class="dot" style="background:#c0392b;"></span> 🧪 Эталон</div>
+          <div class="legend-item" data-type="RADAR"><span class="dot" style="background:#ff3b30;"></span> 📡 Радар</div>
+          <div class="legend-item" data-type="OTHER"><span class="dot" style="background:#7f8c8d;"></span> ⚙️ Бусад</div>
+        </div>
+
+        <div class="legend" id="legendStatus">
+          <div class="legend-title">Станцын төлөв (toggle)</div>
+          <div class="legend-item" data-status="OK"><span class="dot" style="background:#2ecc71;"></span> ✅ Хэвийн</div>
+          <div class="legend-item" data-status="BROKEN"><span class="dot" style="background:#e74c3c;"></span> ⚠️ Эвдрэлтэй</div>
+          <div class="legend-item" data-status="EMPTY"><span class="dot" style="background:#95a5a6;"></span> ⭕ Багажгүй</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script>
-    // 1. Суурь тохиргоо
-    const map = L.map("map").setView([46.8625, 103.8467], 5);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18 }).addTo(map);
+(function(){
+  if (typeof window.L === "undefined") {
+    console.error("Leaflet (L) is not loaded. Check leaflet.js path.");
+    return;
+  }
 
-    let points = [];
-    try {
-        points = JSON.parse(document.getElementById("locations-data").textContent);
-    } catch (e) { console.error("Data error:", e); }
+  // ---- Parse JSON ----
+  let RAW = null;
+  try {
+    RAW = JSON.parse(document.getElementById("locations-data").textContent || "[]");
+    if (typeof RAW === "string") RAW = JSON.parse(RAW);
+  } catch (e) {
+    console.error("locations_json parse error:", e);
+    RAW = [];
+  }
+  const POINTS = Array.isArray(RAW) ? RAW : Object.values(RAW || {});
+  const totalCount = POINTS.length;
 
-    const renderLayer = L.layerGroup().addTo(map);
-    let activeTypes = { "METEO": true, "HYDRO": true, "AWS": true };
-    const typeColors = { "METEO": "#1f77b4", "HYDRO": "#2ca02c", "AWS": "#ff7f0e" };
+  // ---- Colors ----
+  const TYPE_COLORS = {
+    WEATHER: "#4b3bff",
+    AWS: "#f2b233",
+    HYDRO: "#1f8f3a",
+    AEROLOGY: "#a000c8",
+    AGRO: "#6a5a2a",
+    ETALON: "#c0392b",
+    RADAR: "#ff3b30",
+    OTHER: "#7f8c8d",
+  };
 
-    // 2. Шүүлтүүрийн удирдлага
-    const filterCtrl = L.control({position: "topleft"});
-    filterCtrl.onAdd = function() {
-        const div = L.DomUtil.create("div", "ctrl");
-        div.innerHTML = `
-            <label>Аймаг</label>
-            <select id="aimagFilter"><option value="Бүгд">Бүгд</option></select>
-            
-            <label>Байгууллага</label>
-            <select id="orgFilter">
-                <option value="Бүгд">Бүгд</option>
-                <option value="ЦУОШГ">ЦУОШГ</option>
-                <option value="БОХЗТЛ">БОХЗТЛ</option>
-                <option value="НЦУТ">НЦУТ</option>
-            </select>
-            
-            <label>Станцын нэр</label>
-            <input id="nameSearch" placeholder="Хайх..." />
-            <div id="stat" style="font-size:11px; color:#7f8c8d; font-weight:bold; margin-top:5px;"></div>
-        `;
-        return div;
-    };
-    filterCtrl.addTo(map);
+  function normType(t){ return (t || "OTHER").toString().toUpperCase(); }
+  function normStatus(s){
+    const v = (s || "").toString().toUpperCase();
+    if (v.includes("BROKEN") || v.includes("ЭВД")) return "BROKEN";
+    if (v.includes("EMPTY") || v.includes("БАГАЖГҮЙ")) return "EMPTY";
+    if (v.includes("OK") || v.includes("ХЭВ")) return "OK";
+    return v || "OK";
+  }
+  function normText(x){
+    return (x ?? "").toString().trim();
+  }
+  function getOrgName(p){
+    // Try multiple likely keys (backend might name it differently)
+    return normText(
+      p.organization_name ?? p.organization ?? p.org_name ?? p.org ??
+      p.owner_org ?? p.owner ?? p.har_yalagch ?? p.hariutsagch ?? p.hariutsagch_name ??
+      p.responsible_org ?? p.responsible_organization ?? p.bai_guullaga ?? p.bai_guullaga_name
+    ) || "Бусад";
+  }
+  function getAimagName(p){
+    return normText(p.aimag ?? p.aimag_name ?? p.aimagRef ?? p.aimag_ref) || "Бусад";
+  }
+  function getTitle(p){
+    return normText(p.name ?? p.location_name ?? p.title) || "Unnamed";
+  }
 
-    // 3. Legend
-    const legend = L.control({position: "bottomright"});
-    legend.onAdd = function() {
-        const div = L.DomUtil.create("div", "legend");
-        div.innerHTML = `<b>Станцын төрөл:</b>`;
-        Object.keys(typeColors).forEach(type => {
-            const item = L.DomUtil.create("div", "legend-item", div);
-            item.innerHTML = `<span class="dot" style="background:${typeColors[type]}"></span>${type}`;
-            item.onclick = function() {
-                activeTypes[type] = !activeTypes[type];
-                this.classList.toggle("inactive");
-                render();
-            };
-        });
-        return div;
-    };
-    legend.addTo(map);
-
-    const aimagSelect = document.getElementById("aimagFilter");
-    const orgSelect = document.getElementById("orgFilter");
-    const nameSearch = document.getElementById("nameSearch");
-    const stat = document.getElementById("stat");
-
-    const aimags = [...new Set(points.map(p => p.aimag))].sort((a, b) => a.localeCompare(b, 'mn'));
-    aimags.forEach(a => {
-        if(a && a !== "Тодорхойгүй") aimagSelect.innerHTML += `<option value="${a}">${a}</option>`;
+  function makeIcon(color){
+    return L.divIcon({
+      className: "loc-pin",
+      html: `<div style="
+        width:12px;height:12px;border-radius:50%;
+        background:${color};
+        border:2px solid #fff;
+        box-shadow:0 2px 8px rgba(0,0,0,.25);
+      "></div>`,
+      iconSize: [12, 12],
+      iconAnchor: [6, 6],
+      popupAnchor: [0, -6],
     });
+  }
 
-    // 4. Үндсэн Render функц
-    function render() {
-        const selAimag = aimagSelect.value;
-        const selOrg = orgSelect.value;
-        const q = (nameSearch.value || "").toLowerCase().trim();
+  // ---- Map init ----
+  const map = L.map("locmap", { zoomControl: true });
 
-        renderLayer.clearLayers();
-        let count = 0;
+  // Safe tile layer (OSM -> Carto fallback)
+  if (typeof addSafeTileLayer === "function") {
+    addSafeTileLayer(map);
+  } else {
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors",
+      crossOrigin: true,
+    }).addTo(map);
+  }
 
-        points.forEach(p => {
-            // "Аймаг УЦУОШТ" автоматаар үүсгэх логик
-            const autoOrgName = (p.aimag && p.aimag !== "Тодорхойгүй") ? `${p.aimag} УЦУОШТ` : "Тодорхойгүй";
-            
-            const matchAimag = (selAimag === "Бүгд" || p.aimag === selAimag);
-            const matchOrg = (selOrg === "Бүгд" || p.org === selOrg || autoOrgName === selOrg);
-            const matchQuery = (!q || p.name.toLowerCase().includes(q));
+  function invalidateLater(){ try { map.invalidateSize(true); } catch(e) {} }
+  setTimeout(invalidateLater, 50);
+  setTimeout(invalidateLater, 250);
+  setTimeout(invalidateLater, 900);
+  window.addEventListener("resize", () => setTimeout(invalidateLater, 50));
 
-            if (activeTypes[p.type] && matchAimag && matchOrg && matchQuery) {
-                const color = typeColors[p.type] || "#999999";
-                const m = L.circleMarker([p.lat, p.lon], {
-                    radius: 8, color: "#fff", weight: 1, fillColor: color, fillOpacity: 0.9
-                });
-                
-                const displayOrg = (p.org && p.org !== "Тодорхойгүй") ? p.org : autoOrgName;
-                m.bindPopup(`
-                    <div style="min-width:160px;">
-                        <b style="font-size:14px; color:#2c3e50;">${p.name}</b><br>
-                        <hr style="margin:5px 0; border:0; border-top:1px solid #eee;">
-                        <b>Байгууллага:</b> ${displayOrg}<br>
-                        <b>Аймаг:</b> ${p.aimag}<br>
-                        <b>📊 Багажийн тоо:</b> <span style="color:#e67e22; font-weight:bold;">${p.device_count || 0} ш</span>
-                    </div>
-                `);
-                renderLayer.addLayer(m);
-                count++;
-            }
-        });
-        stat.innerHTML = `Харагдаж буй: ${count} / ${points.length}`;
+  document.addEventListener("click", (ev) => {
+    const t = ev.target;
+    if (t && t.closest && (t.closest("[data-widget='pushmenu']") || t.closest(".sidebar-toggle") || t.closest(".navbar-toggler"))) {
+      setTimeout(invalidateLater, 300);
     }
+  });
 
-    // 5. ШИНЭ: Аймаг сонгоход Байгууллагыг автоматаар шүүх логик
-    aimagSelect.onchange = function() {
-        const selectedAimag = this.value;
-        if (selectedAimag !== "Бүгд") {
-            const generatedOrg = `${selectedAimag} УЦУОШТ`;
-            
-            // Хэрэв жагсаалтад тухайн УЦУОШТ байхгүй бол түр нэмэх (сонгох боломжтой болгох)
-            let exists = Array.from(orgSelect.options).some(opt => opt.value === generatedOrg);
-            if (!exists) {
-                const newOpt = new Option(generatedOrg, generatedOrg);
-                orgSelect.add(newOpt);
-            }
-            orgSelect.value = generatedOrg;
-        } else {
-            orgSelect.value = "Бүгд";
-        }
-        render();
-    };
+  const cluster = (L.markerClusterGroup ? L.markerClusterGroup() : L.layerGroup());
+  map.addLayer(cluster);
 
-    orgSelect.onchange = render;
-    nameSearch.oninput = render;
+  const markers = [];
+  const aimags = new Set();
+  const orgs = new Set();
 
-    // 6. URL-аас ирсэн параметрээр ажиллах (Zoom 12)
-    window.onload = function() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const targetName = urlParams.get('name');
+  for (const p of POINTS){
+    const lat = Number(p.lat ?? p.latitude ?? p.Lat ?? p.latitude_deg);
+    const lng = Number(p.lng ?? p.lon ?? p.longitude ?? p.Lon ?? p.longitude_deg);
+    if (!isFinite(lat) || !isFinite(lng)) continue;
 
-        if (targetName) {
-            nameSearch.value = targetName;
-            render(); 
+    const t = normType(p.location_type || p.type);
+    const st = normStatus(p.device_status || p.status);
 
-            const targetPoint = points.find(p => p.name.toLowerCase() === targetName.toLowerCase());
-            if (targetPoint) {
-                map.setView([targetPoint.lat, targetPoint.lon], 12); 
-                
-                // Маркерийг хайж олоод поп-ап нээх
-                setTimeout(() => {
-                    renderLayer.eachLayer(layer => {
-                        if (layer.getLatLng && 
-                            layer.getLatLng().lat === targetPoint.lat && 
-                            layer.getLatLng().lng === targetPoint.lon) {
-                            layer.openPopup();
-                        }
-                    });
-                }, 300); // Давхаргыг бүрэн ачаалагдахыг хүлээх
-            }
-        } else {
-            render(); // Параметр байхгүй бол шууд зурах
-        }
-    };
+    const title = getTitle(p);
+    const aimag = getAimagName(p);
+    const org = getOrgName(p);
+
+    aimags.add(aimag);
+    orgs.add(org);
+
+    const icon = makeIcon(TYPE_COLORS[t] || TYPE_COLORS.OTHER);
+
+    const locUrl = p.loc_admin_url || p.location_url || p.admin_url || p.url || "";
+    const devUrl = p.device_list_url || "";
+
+    const popupHtml = `
+      <div style="min-width:220px;">
+        <div style="font-weight:800;font-size:14px;margin-bottom:6px;">${title}</div>
+        <div style="font-size:12px;opacity:.85;line-height:1.45;">
+          <div><b>Аймаг:</b> ${aimag || "-"}</div>
+          <div><b>Байгууллага:</b> ${org || "-"}</div>
+          <div><b>Төрөл:</b> ${t}</div>
+          <div><b>Төлөв:</b> ${st}</div>
+          <div><b>Коорд:</b> ${lat.toFixed(5)}, ${lng.toFixed(5)}</div>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+          ${locUrl ? `<a href="${locUrl}" style="text-decoration:none;padding:6px 10px;border-radius:10px;border:1px solid rgba(0,0,0,.15);">Location</a>` : ""}
+          ${devUrl ? `<a href="${devUrl}" style="text-decoration:none;padding:6px 10px;border-radius:10px;border:1px solid rgba(0,0,0,.15);">Devices</a>` : ""}
+        </div>
+      </div>
+    `;
+
+    const m = L.marker([lat, lng], { icon, title }).bindPopup(popupHtml);
+    cluster.addLayer(m);
+    markers.push({ marker: m, data: { ...p, _type:t, _status:st, _title:title, _aimag:aimag, _org:org } });
+  }
+
+  if (markers.length){
+    const group = L.featureGroup(markers.map(x => x.marker));
+    map.fitBounds(group.getBounds().pad(0.15));
+  } else {
+    map.setView([46.86, 103.85], 5);
+  }
+
+  // ---- Filters ----
+  const aimagFilter = document.getElementById("aimagFilter");
+  const typeFilter = document.getElementById("typeFilter");
+  const orgFilter  = document.getElementById("orgFilter");
+  const nameSearch = document.getElementById("nameSearch");
+  const countLbl   = document.getElementById("countLbl");
+  const clearBtn   = document.getElementById("clearBtn");
+
+  function fillSelect(sel, values){
+    const current = sel.value || "ALL";
+    while (sel.options.length > 1) sel.remove(1);
+    [...values].sort((a,b)=>a.localeCompare(b)).forEach(v=>{
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = v;
+      sel.appendChild(opt);
+    });
+    if ([...sel.options].some(o=>o.value===current)) sel.value = current;
+  }
+  fillSelect(aimagFilter, aimags);
+  fillSelect(orgFilter, orgs);
+
+  const enabledTypes = new Set(Object.keys(TYPE_COLORS));
+  const enabledStatus = new Set(["OK","BROKEN","EMPTY"]);
+
+  function matchFilters(d){
+    const af = aimagFilter.value;
+    const tf = typeFilter.value;
+    const of = orgFilter.value;
+    const q = (nameSearch.value || "").trim().toLowerCase();
+
+    if (af !== "ALL" && (d._aimag || "") !== af) return false;
+    if (tf !== "ALL" && d._type !== tf) return false;
+    if (of !== "ALL" && (d._org || "") !== of) return false;
+
+    if (!enabledTypes.has(d._type)) return false;
+    if (!enabledStatus.has(d._status)) return false;
+
+    if (q && !d._title.toLowerCase().includes(q)) return false;
+    return true;
+  }
+
+  function apply(){
+    if (cluster.clearLayers) cluster.clearLayers();
+    let shown = 0;
+    for (const x of markers){
+      if (matchFilters(x.data)){
+        cluster.addLayer(x.marker);
+        shown += 1;
+      }
+    }
+    countLbl.textContent = `Харагдаж буй: ${shown} / ${totalCount}`;
+    if (shown > 0){
+      const group = L.featureGroup(cluster.getLayers());
+      map.fitBounds(group.getBounds().pad(0.15));
+    }
+    setTimeout(invalidateLater, 50);
+  }
+
+  [aimagFilter, typeFilter, orgFilter].forEach(el => el.addEventListener("change", apply));
+  nameSearch.addEventListener("input", () => {
+    clearTimeout(window.__locmap_t);
+    window.__locmap_t = setTimeout(apply, 140);
+  });
+
+  clearBtn.addEventListener("click", () => {
+    aimagFilter.value = "ALL";
+    typeFilter.value = "ALL";
+    orgFilter.value = "ALL";
+    nameSearch.value = "";
+
+    enabledTypes.clear(); Object.keys(TYPE_COLORS).forEach(t=>enabledTypes.add(t));
+    enabledStatus.clear(); ["OK","BROKEN","EMPTY"].forEach(s=>enabledStatus.add(s));
+
+    document.querySelectorAll("#legendType .legend-item").forEach(el=>el.classList.remove("inactive"));
+    document.querySelectorAll("#legendStatus .legend-item").forEach(el=>el.classList.remove("inactive"));
+    apply();
+  });
+
+  document.querySelectorAll("#legendType .legend-item").forEach(el => {
+    el.addEventListener("click", () => {
+      const t = el.getAttribute("data-type");
+      if (!t) return;
+      if (enabledTypes.has(t)) { enabledTypes.delete(t); el.classList.add("inactive"); }
+      else { enabledTypes.add(t); el.classList.remove("inactive"); }
+      apply();
+    });
+  });
+
+  document.querySelectorAll("#legendStatus .legend-item").forEach(el => {
+    el.addEventListener("click", () => {
+      const s = el.getAttribute("data-status");
+      if (!s) return;
+      if (enabledStatus.has(s)) { enabledStatus.delete(s); el.classList.add("inactive"); }
+      else { enabledStatus.add(s); el.classList.remove("inactive"); }
+      apply();
+    });
+  });
+
+  apply();
+})();
 </script>
-
-</body>
-</html>
+{% endblock %}

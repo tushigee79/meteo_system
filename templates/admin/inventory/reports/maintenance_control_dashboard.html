@@ -1,0 +1,140 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>{{ title }}</h1>
+
+<form method="get" style="display:flex; gap:12px; align-items:end; flex-wrap:wrap; margin: 12px 0 18px;">
+  <div>
+    <label>Эхлэх</label><br>
+    <input type="date" name="from" value="{{ from }}">
+  </div>
+  <div>
+    <label>Дуусах</label><br>
+    <input type="date" name="to" value="{{ to }}">
+  </div>
+
+  <div>
+    <label>Аймаг</label><br>
+    <select name="aimag">
+      <option value="">(Бүгд)</option>
+      {% for a in aimags %}
+        <option value="{{ a.id }}" {% if selected_aimag == a.id|stringformat:"s" %}selected{% endif %}>
+          {{ a.name }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div>
+    <label>Байгууллага (харьяа)</label><br>
+    <select name="org" style="min-width:240px;">
+      <option value="">(Бүгд)</option>
+      {% for o in orgs %}
+        <option value="{{ o.id }}" {% if selected_org == o.id|stringformat:"s" %}selected{% endif %}>
+          {{ o.name }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div>
+    <label>Үр дүн</label><br>
+    <select name="result">
+      <option value="">(Бүгд)</option>
+      {% for key,label in result_choices %}
+        <option value="{{ key }}" {% if selected_result == key %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div>
+    <button class="button" type="submit">Шүүх</button>
+  </div>
+
+  <div style="margin-left:auto; display:flex; gap:8px;">
+    <a class="button" href="export-csv/?from={{ from }}&to={{ to }}&aimag={{ selected_aimag }}&org={{ selected_org }}&result={{ selected_result }}">⬇ CSV</a>
+    <a class="button" href="export-xlsx/?from={{ from }}&to={{ to }}&aimag={{ selected_aimag }}&org={{ selected_org }}&result={{ selected_result }}">⬇ Excel</a>
+    <a class="button" href="export-pdf/?from={{ from }}&to={{ to }}&aimag={{ selected_aimag }}&org={{ selected_org }}&result={{ selected_result }}">⬇ PDF</a>
+  </div>
+</form>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:18px; max-width:1200px;">
+  <div class="module">
+    <h2>Засвар, үйлчилгээ — Аймгаар</h2>
+    <canvas id="msByAimagChart" height="160"></canvas>
+    <table class="adminlist" style="width:100%; margin-top:10px;">
+      <thead><tr><th>Аймаг</th><th>Тоо</th></tr></thead>
+      <tbody>
+      {% for r in ms_by_aimag %}
+        <tr>
+          <td>{{ r.device__location__aimag_ref__name|default:"(Тодорхойгүй)" }}</td>
+          <td>{{ r.total }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="2">Өгөгдөл алга.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="module">
+    <h2>Хяналт, тохируулга — Үр дүнгээр</h2>
+    <canvas id="caByResultChart" height="160"></canvas>
+    <table class="adminlist" style="width:100%; margin-top:10px;">
+      <thead><tr><th>Үр дүн</th><th>Тоо</th></tr></thead>
+      <tbody>
+      {% for r in ca_by_result %}
+        <tr>
+          <td>{{ r.result }}</td>
+          <td>{{ r.total }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="2">Өгөгдөл алга.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="module" style="margin-top:18px; max-width:1200px;">
+  <h2>Засвар, үйлчилгээ — Байгууллагаар</h2>
+  <table class="adminlist" style="width:100%;">
+    <thead><tr><th>Байгууллага</th><th>Тоо</th></tr></thead>
+    <tbody>
+    {% for r in ms_by_org %}
+      <tr>
+        <td>{{ r.device__location__owner_org__name|default:"(Тодорхойгүй)" }}</td>
+        <td>{{ r.total }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="2">Өгөгдөл алга.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+  const msLabels = JSON.parse({{ ms_labels_json|safe }});
+  const msValues = JSON.parse({{ ms_values_json|safe }});
+  const caLabels = JSON.parse({{ ca_labels_json|safe }});
+  const caValues = JSON.parse({{ ca_values_json|safe }});
+
+  const msCtx = document.getElementById("msByAimagChart");
+  if (msCtx) {
+    new Chart(msCtx, {
+      type: "bar",
+      data: { labels: msLabels, datasets: [{ label: "Засвар, үйлчилгээ", data: msValues }] },
+      options: { responsive: true }
+    });
+  }
+
+  const caCtx = document.getElementById("caByResultChart");
+  if (caCtx) {
+    new Chart(caCtx, {
+      type: "pie",
+      data: { labels: caLabels, datasets: [{ label: "Үр дүн", data: caValues }] },
+      options: { responsive: true }
+    });
+  }
+</script>
+{% endblock %}
