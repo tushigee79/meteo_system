@@ -41,3 +41,21 @@ __untracked_backup__/
 __untracked_hold__/
 
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Django / local
+.env
+*.sqlite3
+media/
+
+# Virtual env
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
