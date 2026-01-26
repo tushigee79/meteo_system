@@ -2,24 +2,136 @@
 <html>
 <head>
     <title>{{ station.name }} - Байршил</title>
+
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
     <style>
+        body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
         #map { height: 100vh; width: 100%; }
-        body { margin: 0; }
+
+        .legend {
+            background: #fff;
+            padding: 10px 12px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,.15);
+            font-size: 13px;
+            line-height: 1.3;
+        }
+        .legend .row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 5px 0;
+        }
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            border: 1px solid rgba(0,0,0,.3);
+            display: inline-block;
+        }
     </style>
 </head>
 <body>
-    <div id="map"></div>
-    <script>
-        var map = L.map('map').setView([{{ station.latitude }}, {{ station.longitude }}], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: 'NAMEM 2026'
-        }).addTo(map);
 
-        L.marker([{{ station.latitude }}, {{ station.longitude }}]).addTo(map)
-            .bindPopup("<b>{{ station.name }}</b><br>{{ station.aimag_ref.name }}")
-            .openPopup();
-    </script>
+{{ station|json_script:"station-data" }}
+
+<div id="map"></div>
+
+<script>
+(function () {
+
+    const TYPE_COLORS = {
+        WEATHER: "#2E86DE",
+        AWS: "#17A589",
+        RADAR: "#8E44AD",
+        HYDRO: "#1B4F72",
+        AEROLOGY: "#CA6F1E",
+        AGRO: "#229954",
+        ETALON: "#B03A2E",
+        OTHER: "#7F8C8D",
+    };
+
+    function normalizeType(t) {
+        t = (t || "OTHER").toUpperCase();
+        return TYPE_COLORS[t] ? t : "OTHER";
+    }
+
+    const raw = document.getElementById("station-data").textContent;
+    const station = JSON.parse(raw);
+
+    const lat = Number(station.latitude || station.lat);
+    const lon = Number(station.longitude || station.lon);
+
+    const type = normalizeType(station.location_type || station.type);
+    const color = TYPE_COLORS[type];
+
+    const map = L.map('map').setView([lat, lon], 12);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: 'NAMEM 2026'
+    }).addTo(map);
+
+    const icon = L.divIcon({
+        className: "",
+        html: `<div style="
+            width:18px;height:18px;border-radius:50%;
+            background:${color};
+            border:3px solid rgba(255,255,255,.95);
+            box-shadow:0 2px 8px rgba(0,0,0,.35);
+        "></div>`,
+        iconSize: [18,18],
+        iconAnchor: [9,9],
+        popupAnchor: [0,-10]
+    });
+
+    const popupHtml = `
+        <div style="min-width:220px">
+            <b>${escapeHtml(station.name)}</b><br>
+            ${escapeHtml(station.aimag_ref?.name || "")}<br>
+            <small>
+                Type: ${type}<br>
+                Lat/Lon: ${lat.toFixed(5)}, ${lon.toFixed(5)}
+            </small>
+        </div>
+    `;
+
+    L.marker([lat, lon], { icon: icon })
+        .addTo(map)
+        .bindPopup(popupHtml)
+        .openPopup();
+
+    // ---- Legend ----
+    const legend = L.control({ position: "bottomleft" });
+
+    legend.onAdd = function () {
+        const div = L.DomUtil.create("div", "legend");
+        div.innerHTML = `
+            <div style="font-weight:700;margin-bottom:6px;">Legend (8 төрөл)</div>
+            ${Object.keys(TYPE_COLORS).map(k => `
+                <div class="row">
+                    <span class="dot" style="background:${TYPE_COLORS[k]}"></span>
+                    <span>${k}</span>
+                </div>
+            `).join("")}
+        `;
+        return div;
+    };
+
+    legend.addTo(map);
+
+    function escapeHtml(s) {
+        return String(s || "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+    }
+
+})();
+</script>
+
 </body>
 </html>

@@ -3,6 +3,8 @@
 
 {% block extrahead %}
   {{ block.super }}
-  <!-- Admin sidebar custom link -->
-  <script src="{% static 'js/admin_sidebar_link.js' %}"></script>
+  <script>
+    // Device add/change page cascade endpoints base (admin registered under /django-admin/)
+    window.__DEVICE_LOCATION_FILTER_API_BASE__ = "/django-admin/inventory/device/";
+  </script>
 {% endblock %}

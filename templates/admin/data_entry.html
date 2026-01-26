@@ -1,0 +1,33 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div style="max-width: 1100px;">
+  <h1 style="margin-bottom: 12px;">{{ title }}</h1>
+  <p style="color: #666; margin-bottom: 16px;">
+    Эндээс админ өгөгдөл бүртгэх үндсэн хэсгүүд рүү хурдан орно.
+  </p>
+
+  <div style="
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 12px;
+  ">
+    {% for name, url, icon in cards %}
+      <a href="{{ url }}" class="button"
+         style="
+           display:flex;
+           align-items:center;
+           justify-content:flex-start;
+           gap:10px;
+           padding:14px 14px;
+           text-decoration:none;
+           border-radius:10px;
+           border:1px solid rgba(0,0,0,.08);
+           background:#fff;
+         ">
+        <i class="{{ icon }}" style="width:18px;"></i>
+        <span style="font-size:14px;">{{ name }}</span>
+      </a>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

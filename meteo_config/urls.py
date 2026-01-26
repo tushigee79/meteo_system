@@ -11,9 +11,16 @@ from inventory.admin_dashboard import (
     export_devices_csv,
 )
 
-from inventory.views import location_map, station_map_view
+# ✅ views-ийг функцээр нь импортлоно (views гэж namespace хэрэггүй)
+from inventory.views import (
+    location_map,
+    station_map_view,
+    admin_data_entry,
+)
+
 from inventory.views_district_api import lookup_district_api
 from inventory.views_auth import force_password_change
+
 
 urlpatterns = [
     # =========================
@@ -36,15 +43,18 @@ urlpatterns = [
     path("admin/login/", lambda request: redirect("/django-admin/login/", permanent=False)),
     path("admin/logout/", lambda request: redirect("/django-admin/logout/", permanent=False)),
 
+    # Admin data entry hub
+    path("admin/data-entry/", admin_data_entry, name="admin_data_entry"),
+
     # =========================
     # 4) INVENTORY URLS (✅ эндээс API ажиллана)
     # =========================
     path("inventory/", include("inventory.urls")),
 
     # =========================
-    # 5) MAP (хуучин замаа хадгалж үлдээлээ)
+    # 5) MAP
     # =========================
-    path("inventory/map/", location_map, name="station_map"),
+    path("inventory/map/", location_map, name="inventory_map"),
     path("inventory/map/one/", station_map_view, name="station_map_one"),
 
     # =========================

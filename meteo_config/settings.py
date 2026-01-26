@@ -60,7 +60,6 @@ TIME_ZONE = 'Asia/Ulaanbaatar'
 USE_I18N = True
 USE_TZ = True
 
-# ✅ Password policy (production-ready)
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 10}},
@@ -78,27 +77,25 @@ STATICFILES_DIRS = [
 ]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
-# settings.py
-
+# =========================================================
+# JAZZMIN (FINAL – нэг л блок, dict бүтэцтэй)
+# =========================================================
 JAZZMIN_SETTINGS = {
     "site_title": "NAMEM Багаж Хяналт",
     "site_header": "NAMEM",
     "site_brand": "Ус, Цаг Уурын Систем",
     "copyright": "NAMEM 2026",
+
     "search_model": ["inventory.Device"],
     "show_sidebar": True,
     "navigation_expanded": True,
-
-    # ✅ FIX: leading "/" заавал хэрэгтэй
     "base_url": "/django-admin/",
-
-    # (Чиний байгаа custom js хэвээр)
     "custom_js": "js/admin_sidebar_link.js",
-
     "use_google_fonts": True,
+
     "icons": {
         "auth": "fas fa-users-cog",
         "inventory.Location": "fas fa-map-marker-alt",
@@ -106,21 +103,59 @@ JAZZMIN_SETTINGS = {
         "inventory.SparePartOrder": "fas fa-shopping-cart",
     },
 
-    # ✅ NEW: Sidebar дээр Dashboard 2 линк
+    # Sidebar
     "custom_links": {
-        "Inventory": [
-            {"name": "Dashboard (Хүснэгт)", "url": "/admin/dashboard/table/", "icon": "fas fa-table"},
-            {"name": "Dashboard (График)",  "url": "/admin/dashboard/graph/", "icon": "fas fa-chart-bar"},
-        ]
+        "inventory": [
+            {
+                "name": "Өгөгдөл бүртгэх (Админ)",
+                "url": "/admin/data-entry/",
+                "icon": "fas fa-database",
+                "permissions": ["auth.view_user"],
+            },
+            {
+                "name": "Dashboard (Хүснэгт)",
+                "url": "/admin/dashboard/table/",
+                "icon": "fas fa-table",
+                "permissions": ["inventory.view_device"],
+            },
+            {
+                "name": "Dashboard (График)",
+                "url": "/admin/dashboard/graph/",
+                "icon": "fas fa-chart-bar",
+                "permissions": ["inventory.view_device"],
+            },
+            {
+                "name": "Газрын зураг",
+                "url": "inventory_map",
+                "icon": "fas fa-map",
+                "permissions": ["inventory.view_location"],
+            },
+            {
+                "name": "Газрын зураг (8 төрөл)",
+                "url": "/inventory/map/",
+                "icon": "fas fa-map-marked-alt",
+                "permissions": ["inventory.view_location"],
+            },
+        ],
+        "auth": [
+            {
+                "name": "Хэрэглэгчид",
+                "url": "/django-admin/auth/user/",
+                "icon": "fas fa-user",
+                "permissions": ["auth.view_user"],
+            },
+            {
+                "name": "Бүлгүүд",
+                "url": "/django-admin/auth/group/",
+                "icon": "fas fa-users",
+                "permissions": ["auth.view_group"],
+            },
+        ],
     },
 
-    # Чиний top links хэвээр
-    "custom_links_top": [
-        {
-            "name": "Админ хэсэг",
-            "url": "/django-admin/",
-            "icon": "fas fa-user-shield",
-            "permissions": [],
-        }
+    # Top menu
+    "topmenu_links": [
+        {"name": "Admin", "url": "admin:index", "permissions": ["auth.view_user"]},
+        {"name": "Газрын зураг", "url": "inventory_map", "permissions": ["inventory.view_location"]},
     ],
 }
