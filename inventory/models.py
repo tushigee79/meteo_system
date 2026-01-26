@@ -244,12 +244,19 @@ class Device(models.Model):
 
 
 # ============================================================
-# 5) Засвар, үйлчилгээ  ✅ ШИНЭ
+# ✅ WorkflowStatus helper (shared)
+# ============================================================
+class WorkflowStatus(models.TextChoices):
+    DRAFT = "DRAFT", "Draft"
+    SUBMITTED = "SUBMITTED", "Submitted"
+    APPROVED = "APPROVED", "Approved"
+    REJECTED = "REJECTED", "Rejected"
+
+
+# ============================================================
+# 5) Засвар, үйлчилгээ
 # ============================================================
 class MaintenanceService(models.Model):
-    """
-    Засвар, үйлчилгээ
-    """
     PERFORMER_TYPES = [
         ("ENGINEER", "Инженер"),
         ("ORG", "Байгууллага"),
@@ -295,6 +302,7 @@ class MaintenanceService(models.Model):
         verbose_name="Хийсэн байгууллага (нэр)",
     )
 
+    # (Хуучин 1 файл) — олон файл нь MaintenanceEvidence model дээр хадгалагдана.
     evidence = models.FileField(
         upload_to="evidence/maintenance/%Y/%m/",
         blank=True,
@@ -303,19 +311,58 @@ class MaintenanceService(models.Model):
     )
 
     note = models.TextField(blank=True, default="", verbose_name="Тайлбар / тэмдэглэл")
+
+    # --- Workflow ---
+    workflow_status = models.CharField(
+        max_length=12,
+        choices=WorkflowStatus.choices,
+        default=WorkflowStatus.DRAFT,
+        verbose_name="Workflow төлөв",
+    )
+    submitted_at = models.DateTimeField(null=True, blank=True, verbose_name="Илгээсэн огноо")
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ms_submitted",
+        verbose_name="Илгээсэн хэрэглэгч",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True, verbose_name="Баталсан огноо")
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ms_approved",
+        verbose_name="Баталсан хэрэглэгч",
+    )
+    rejected_at = models.DateTimeField(null=True, blank=True, verbose_name="Татгалзсан огноо")
+    rejected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ms_rejected",
+        verbose_name="Татгалзсан хэрэглэгч",
+    )
+    reject_reason = models.TextField(blank=True, default="", verbose_name="Reject шалтгаан")
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         verbose_name = "Засвар, үйлчилгээ"
         verbose_name_plural = "Засвар, үйлчилгээ"
         ordering = ["-date", "-id"]
+        permissions = [
+            ("can_approve_workflow", "Can approve/reject workflow"),
+        ]
 
     def __str__(self):
         return f"{self.device} - {self.get_reason_display()} ({self.date})"
 
     def clean(self):
         super().clean()
-
         eng = (self.performer_engineer_name or "").strip()
         org = (self.performer_org_name or "").strip()
 
@@ -333,12 +380,9 @@ class MaintenanceService(models.Model):
 
 
 # ============================================================
-# 6) Хяналт, тохируулга  ✅ ШИНЭ
+# 6) Хяналт, тохируулга
 # ============================================================
 class ControlAdjustment(models.Model):
-    """
-    Хяналт, тохируулга
-    """
     PERFORMER_TYPES = [
         ("ENGINEER", "Инженер"),
         ("ORG", "Байгууллага"),
@@ -358,12 +402,7 @@ class ControlAdjustment(models.Model):
     )
     date = models.DateField(verbose_name="Огноо")
 
-    result = models.CharField(
-        max_length=20,
-        choices=RESULTS,
-        default="PASS",
-        verbose_name="Үр дүн",
-    )
+    result = models.CharField(max_length=20, choices=RESULTS, default="PASS", verbose_name="Үр дүн")
 
     performer_type = models.CharField(
         max_length=10,
@@ -384,6 +423,7 @@ class ControlAdjustment(models.Model):
         verbose_name="Хийсэн байгууллага (нэр)",
     )
 
+    # (Хуучин 1 файл) — олон файл нь ControlEvidence model дээр хадгалагдана.
     evidence = models.FileField(
         upload_to="evidence/control/%Y/%m/",
         blank=True,
@@ -392,19 +432,58 @@ class ControlAdjustment(models.Model):
     )
 
     note = models.TextField(blank=True, default="", verbose_name="Тайлбар / тэмдэглэл")
+
+    # --- Workflow ---
+    workflow_status = models.CharField(
+        max_length=12,
+        choices=WorkflowStatus.choices,
+        default=WorkflowStatus.DRAFT,
+        verbose_name="Workflow төлөв",
+    )
+    submitted_at = models.DateTimeField(null=True, blank=True, verbose_name="Илгээсэн огноо")
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ca_submitted",
+        verbose_name="Илгээсэн хэрэглэгч",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True, verbose_name="Баталсан огноо")
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ca_approved",
+        verbose_name="Баталсан хэрэглэгч",
+    )
+    rejected_at = models.DateTimeField(null=True, blank=True, verbose_name="Татгалзсан огноо")
+    rejected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ca_rejected",
+        verbose_name="Татгалзсан хэрэглэгч",
+    )
+    reject_reason = models.TextField(blank=True, default="", verbose_name="Reject шалтгаан")
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         verbose_name = "Хяналт, тохируулга"
         verbose_name_plural = "Хяналт, тохируулга"
         ordering = ["-date", "-id"]
+        permissions = [
+            ("can_approve_workflow", "Can approve/reject workflow"),
+        ]
 
     def __str__(self):
         return f"{self.device} - {self.get_result_display()} ({self.date})"
 
     def clean(self):
         super().clean()
-
         eng = (self.performer_engineer_name or "").strip()
         org = (self.performer_org_name or "").strip()
 
@@ -419,6 +498,56 @@ class ControlAdjustment(models.Model):
                 raise ValidationError({"performer_org_name": "Байгууллагын нэр заавал."})
             if eng:
                 raise ValidationError({"performer_engineer_name": "Байгууллага сонгосон үед инженер бөглөхгүй."})
+
+
+# ============================================================
+# 6.1) Засварын олон нотлох баримт  ✅ ШИНЭ
+# ============================================================
+class MaintenanceEvidence(models.Model):
+    service = models.ForeignKey(
+        "inventory.MaintenanceService",
+        on_delete=models.CASCADE,
+        related_name="evidences",
+        verbose_name="Засвар, үйлчилгээ",
+    )
+    file = models.FileField(
+        upload_to="evidence/maintenance/%Y/%m/",
+        verbose_name="Нотлох баримт (файл)",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Засварын нотлох баримт"
+        verbose_name_plural = "Засварын нотлох баримтууд"
+        ordering = ["-uploaded_at", "-id"]
+
+    def __str__(self):
+        return f"{self.service_id} evidence #{self.id}"
+
+
+# ============================================================
+# 6.2) Хяналтын олон нотлох баримт  ✅ ШИНЭ
+# ============================================================
+class ControlEvidence(models.Model):
+    control = models.ForeignKey(
+        "inventory.ControlAdjustment",
+        on_delete=models.CASCADE,
+        related_name="evidences",
+        verbose_name="Хяналт, тохируулга",
+    )
+    file = models.FileField(
+        upload_to="evidence/control/%Y/%m/",
+        verbose_name="Нотлох баримт (файл)",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Хяналтын нотлох баримт"
+        verbose_name_plural = "Хяналтын нотлох баримтууд"
+        ordering = ["-uploaded_at", "-id"]
+
+    def __str__(self):
+        return f"{self.control_id} evidence #{self.id}"
 
 
 # ============================================================
@@ -480,3 +609,48 @@ class AuthAuditLog(models.Model):
 
     def __str__(self):
         return f"{self.created_at:%Y-%m-%d %H:%M:%S} {self.action} {self.username}"
+
+
+# ============================================================
+# 10) Workflow + Data Audit (CRUD)
+# ============================================================
+class AuditEvent(models.Model):
+    """CRUD + workflow action audit log.
+    (Нэвтрэлтийн аудит нь AuthAuditLog дээр хадгалагдана.)
+    """
+
+    class Action(models.TextChoices):
+        CREATE = "CREATE", "CREATE"
+        UPDATE = "UPDATE", "UPDATE"
+        DELETE = "DELETE", "DELETE"
+        SUBMIT = "SUBMIT", "SUBMIT"
+        APPROVE = "APPROVE", "APPROVE"
+        REJECT = "REJECT", "REJECT"
+        LIFECYCLE = "LIFECYCLE", "LIFECYCLE"
+        NOTIFY = "NOTIFY", "NOTIFY"
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="audit_events",
+        verbose_name="Хэрэглэгч",
+    )
+    action = models.CharField(max_length=20, choices=Action.choices, verbose_name="Үйлдэл")
+
+    model_label = models.CharField(max_length=100, verbose_name="Model")  # e.g. inventory.ControlAdjustment
+    object_id = models.CharField(max_length=50, blank=True, default="", verbose_name="Object ID")
+    object_repr = models.CharField(max_length=255, blank=True, default="", verbose_name="Object")
+
+    ip_address = models.GenericIPAddressField(null=True, blank=True, verbose_name="IP")
+    created_at = models.DateTimeField(default=timezone.now)
+    changes = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        verbose_name = "Audit event"
+        verbose_name_plural = "Audit events"
+
+    def __str__(self):
+        return f"{self.created_at:%Y-%m-%d %H:%M:%S} {self.action} {self.model_label}#{self.object_id}"

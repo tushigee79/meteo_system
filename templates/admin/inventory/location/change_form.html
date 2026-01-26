@@ -1,0 +1,10 @@
+{% extends "admin/change_form.html" %}
+
+{% block submit_buttons_top %}
+  <div class="submit-row" style="margin-bottom:10px;">
+    <a class="button" href="../import-csv/" style="padding:10px 14px;">
+      CSV-ээр импорт хийх
+    </a>
+  </div>
+  {{ block.super }}
+{% endblock %}
