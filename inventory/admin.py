@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from typing import Any, Dict
-
 import json
 
 from django.contrib import admin
-from django.contrib.admin.views.main import ChangeList
-from django.shortcuts import render
-from django.db.models import Count, QuerySet
+from django.db.models import Count, Q, QuerySet
 from django.http import HttpRequest, JsonResponse
+from django.shortcuts import render
 from django.urls import path, reverse
 from django.utils.html import format_html
 
@@ -29,46 +27,33 @@ from .models import (
     AuthAuditLog,
 )
 
-# Optional model (may not exist in some versions)
+# Optional
 try:
     from .models import AuditEvent  # type: ignore
-except Exception:  # pragma: no cover
+except Exception:
     AuditEvent = None  # type: ignore
 
 
 # ============================================================
-# Scope helpers (Аймгийн инженер зөвхөн өөрийн аймгийн data)
+# Scope helpers (аймгийн инженер зөвхөн өөрийн аймаг)
 # ============================================================
+
 def _get_scope(request: HttpRequest) -> Dict[str, Any]:
-    """
-    Scope:
-      - superuser => all
-      - others => UserProfile.aimag (optionally sumduureg for UB if you later add it)
-    """
     u = getattr(request, "user", None)
     if not u or u.is_superuser:
         return {"all": True, "aimag_id": None, "sum_id": None}
 
     prof = getattr(u, "profile", None) or getattr(u, "userprofile", None)
     aimag_id = getattr(prof, "aimag_id", None)
-
-    # Optional UB district/sum scope (only if present on profile)
     sum_id = (
         getattr(prof, "sumduureg_id", None)
         or getattr(prof, "sum_ref_id", None)
         or getattr(prof, "district_id", None)
     )
-
     return {"all": False, "aimag_id": aimag_id, "sum_id": sum_id}
 
 
 def _scope_qs(request: HttpRequest, qs: QuerySet, *, aimag_field: str) -> QuerySet:
-    """
-    aimag_field: queryset model дээрх aimag FK field path
-      - Location: "aimag_ref"
-      - Device: "location__aimag_ref"
-      - MaintenanceService: "device__location__aimag_ref"
-    """
     scope = _get_scope(request)
     if scope.get("all"):
         return qs
@@ -79,14 +64,12 @@ def _scope_qs(request: HttpRequest, qs: QuerySet, *, aimag_field: str) -> QueryS
 
     qs = qs.filter(**{f"{aimag_field}_id": aimag_id})
 
-    # UB дээр sum scope байвал (model талбар байвал) нарийсгана
     sum_id = scope.get("sum_id")
     if aimag_id == 1 and sum_id:
-        # Location бол sum_ref, бусад нь location__sum_ref гэсэн бүтэцтэй
         if aimag_field.endswith("aimag_ref") and hasattr(qs.model, "sum_ref_id"):
             qs = qs.filter(sum_ref_id=sum_id)
         elif "location__" in aimag_field:
-            qs = qs.filter(device__location__sum_ref_id=sum_id) if qs.model is MaintenanceService else qs
+            qs = qs.filter(device__location__sum_ref_id=sum_id)
     return qs
 
 
@@ -106,17 +89,16 @@ def _scope_location_qs(request: HttpRequest) -> QuerySet[Location]:
 # ============================================================
 # Inlines
 # ============================================================
+
 class MaintenanceEvidenceInline(admin.TabularInline):
     model = MaintenanceEvidence
     extra = 1
-    fields = ("file", "uploaded_at")
     readonly_fields = ("uploaded_at",)
 
 
 class ControlEvidenceInline(admin.TabularInline):
     model = ControlEvidence
     extra = 1
-    fields = ("file", "uploaded_at")
     readonly_fields = ("uploaded_at",)
 
 
@@ -126,7 +108,8 @@ class MaintenanceHistoryInline(admin.TabularInline):
     extra = 0
     can_delete = False
     show_change_link = True
-    fields = (
+    ordering = ("-date", "-id")
+    readonly_fields = (
         "date",
         "reason",
         "workflow_status",
@@ -135,8 +118,7 @@ class MaintenanceHistoryInline(admin.TabularInline):
         "performer_org_name",
         "note",
     )
-    readonly_fields = fields
-    ordering = ("-date", "-id")
+    fields = readonly_fields
 
 
 class ControlHistoryInline(admin.TabularInline):
@@ -145,7 +127,8 @@ class ControlHistoryInline(admin.TabularInline):
     extra = 0
     can_delete = False
     show_change_link = True
-    fields = (
+    ordering = ("-date", "-id")
+    readonly_fields = (
         "date",
         "result",
         "workflow_status",
@@ -154,13 +137,18 @@ class ControlHistoryInline(admin.TabularInline):
         "performer_org_name",
         "note",
     )
-    readonly_fields = fields
-    ordering = ("-date", "-id")
+    fields = readonly_fields
+
+
+class SparePartItemInline(admin.TabularInline):
+    model = SparePartItem
+    extra = 1
 
 
 # ============================================================
 # Master tables
 # ============================================================
+
 @admin.register(Aimag)
 class AimagAdmin(admin.ModelAdmin):
     search_fields = ("name", "code")
@@ -186,6 +174,7 @@ class OrganizationAdmin(admin.ModelAdmin):
 # ============================================================
 # Instrument catalog
 # ============================================================
+
 @admin.register(InstrumentCatalog)
 class InstrumentCatalogAdmin(admin.ModelAdmin):
     list_display = ("code", "name_mn", "kind", "unit", "is_active")
@@ -195,11 +184,12 @@ class InstrumentCatalogAdmin(admin.ModelAdmin):
 
 
 # ============================================================
-# Location (map + cascade)
+# Location (map + cascade + device count)
 # ============================================================
+
 @admin.register(Location)
 class LocationAdmin(admin.ModelAdmin):
-    """Байршил (Location) жагсаалт дээр багануудыг буцааж гаргах + map харах линк."""
+    change_list_template = "inventory/admin/location_changelist_with_map.html"
 
     list_display = (
         "name",
@@ -214,40 +204,48 @@ class LocationAdmin(admin.ModelAdmin):
         "device_count_col",
         "view_map_col",
     )
-    list_filter = ("location_type", "aimag_ref", "owner_org")
-    search_fields = ("name", "wmo_index", "aimag_ref__name", "sum_ref__name", "district_name")
+
+    list_filter = ("location_type", "aimag_ref", "sum_ref", "owner_org")
+    search_fields = ("name", "code", "wmo_index", "aimag_ref__name", "sum_ref__name", "owner_org__name")
     ordering = ("aimag_ref__name", "sum_ref__name", "name")
 
     class Media:
         js = ("inventory/js/admin/location_add_cascade.js",)
 
-    def get_urls(self):
-        urls = super().get_urls()
-        custom = [
-            # cascade endpoint (Location add/edit form дээр)
-            path("sums-by-aimag/", self.sums_by_aimag_view, name="location_sums_by_aimag"),
-            # map views (separate from changelist)
-            path("map/", self.admin_site.admin_view(self.map_view), name="inventory_location_map"),
-            path(
-                "map/<int:location_id>/",
-                self.admin_site.admin_view(self.map_one_view),
-                name="inventory_location_map_one",
-            ),
-        ]
-        return custom + urls
-
-    def sums_by_aimag_view(self, request: HttpRequest):
-        aimag_id = (request.GET.get("aimag_id") or "").strip()
-        qs = SumDuureg.objects.all().order_by("name")
-        if aimag_id:
-            qs = qs.filter(aimag_id=aimag_id)
-        results = [{"id": s.id, "text": s.name} for s in qs]
-        return JsonResponse({"results": results})
-
+    # -------- queryset --------
     def get_queryset(self, request: HttpRequest) -> QuerySet:
         qs = super().get_queryset(request)
         qs = qs.select_related("aimag_ref", "sum_ref", "owner_org")
-        qs = qs.annotate(device_count=Count("devices"))
+
+        qs = qs.annotate(
+            device_count=Count("devices", distinct=True),
+
+            pending_maintenance=Count(
+                "devices__maintenance_services",
+                filter=Q(devices__maintenance_services__workflow_status="SUBMITTED"),
+                distinct=True,
+            ),
+
+            pending_control=Count(
+                "devices__control_adjustments",
+                filter=Q(devices__control_adjustments__workflow_status="SUBMITTED"),
+                distinct=True,
+            ),
+        ).annotate(
+            pending_total=
+                Count(
+                    "devices__maintenance_services",
+                    filter=Q(devices__maintenance_services__workflow_status="SUBMITTED"),
+                    distinct=True,
+                )
+                +
+                Count(
+                    "devices__control_adjustments",
+                    filter=Q(devices__control_adjustments__workflow_status="SUBMITTED"),
+                    distinct=True,
+                )
+        )
+
         return _scope_qs(request, qs, aimag_field="aimag_ref")
 
     # -------- columns --------
@@ -263,7 +261,28 @@ class LocationAdmin(admin.ModelAdmin):
         except Exception:
             return "-"
 
-    # -------- map views --------
+    # -------- cascade endpoint --------
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path("sums-by-aimag/", self.sums_by_aimag_view, name="location_sums_by_aimag"),
+            path("map/", self.admin_site.admin_view(self.map_view), name="inventory_location_map"),
+            path(
+                "map/<int:location_id>/",
+                self.admin_site.admin_view(self.map_one_view),
+                name="inventory_location_map_one",
+            ),
+        ]
+        return custom + urls
+
+    def sums_by_aimag_view(self, request: HttpRequest):
+        aimag_id = (request.GET.get("aimag_id") or "").strip()
+        qs = SumDuureg.objects.all().order_by("name")
+        if aimag_id:
+            qs = qs.filter(aimag_id=aimag_id)
+        return JsonResponse({"results": [{"id": s.id, "text": s.name} for s in qs]})
+
+    # -------- map helpers --------
     def _build_locations_payload(self, qs: QuerySet[Location]):
         items = []
         for o in qs[:5000]:
@@ -276,49 +295,51 @@ class LocationAdmin(admin.ModelAdmin):
                     "type": (o.location_type or "OTHER"),
                     "org": getattr(getattr(o, "owner_org", None), "name", "") or "",
                     "device_count": int(getattr(o, "device_count", 0) or 0),
+                    "pending_maintenance": int(getattr(o, "pending_maintenance", 0) or 0),
+                    "pending_control": int(getattr(o, "pending_control", 0) or 0),
+                    "pending_total": int(getattr(o, "pending_total", 0) or 0),
                     "aimag": getattr(getattr(o, "aimag_ref", None), "name", "") or "",
                     "sum": getattr(getattr(o, "sum_ref", None), "name", "") or "",
                     "district": o.district_name or "",
                     "lat": float(o.latitude),
                     "lon": float(o.longitude),
                     "wmo": o.wmo_index or "",
-                    # convenience links
                     "loc_admin_url": reverse("admin:inventory_location_change", args=[o.id]),
                     "device_list_url": reverse("admin:inventory_device_changelist") + f"?location__id__exact={o.id}",
                 }
             )
         return items
 
-    def map_view(self, request: HttpRequest):
-        # scope + annotate
+    def changelist_view(self, request: HttpRequest, extra_context=None):
         qs = self.get_queryset(request)
-        items = self._build_locations_payload(qs)
+        extra_context = extra_context or {}
+        extra_context["locations_json"] = json.dumps(self._build_locations_payload(qs), ensure_ascii=False)
+        return super().changelist_view(request, extra_context=extra_context)
+
+    def map_view(self, request: HttpRequest):
+        qs = self.get_queryset(request)
         ctx = dict(
             self.admin_site.each_context(request),
             title="Станцуудын байршил (Газрын зураг)",
-            locations_json=json.dumps(items, ensure_ascii=False),
+            locations_json=json.dumps(self._build_locations_payload(qs), ensure_ascii=False),
         )
-        # existing template expected in your project
         return render(request, "inventory/location_map.html", ctx)
 
     def map_one_view(self, request: HttpRequest, location_id: int):
         qs = self.get_queryset(request).filter(id=location_id)
-        items = self._build_locations_payload(qs)
         ctx = dict(
             self.admin_site.each_context(request),
             title="Байршил (Газрын зураг)",
-            locations_json=json.dumps(items, ensure_ascii=False),
+            locations_json=json.dumps(self._build_locations_payload(qs), ensure_ascii=False),
             focus_id=location_id,
         )
-        # Always reuse the main map template.
-        # Reason: older/legacy location_map_one.html versions often miss tile-layer/init logic
-        # and render a blank map with only zoom controls.
         return render(request, "inventory/location_map.html", ctx)
 
 
 # ============================================================
-# Device (kind filter + location filter + inline history)
+# Device
 # ============================================================
+
 @admin.register(Device)
 class DeviceAdmin(admin.ModelAdmin):
     list_display = ("serial_number", "kind", "location", "status")
@@ -342,27 +363,17 @@ class DeviceAdmin(admin.ModelAdmin):
         return custom + urls
 
     def catalog_by_kind_view(self, request: HttpRequest):
-        """
-        Return InstrumentCatalog options filtered by Device.kind
-        GET: ?kind=WEATHER|HYDRO|AWS|ETALON|RADAR|AEROLOGY|AGRO|OTHER
-        Response: {"results":[{"id":..,"text":"CODE - NAME"}, ...]}
-        """
         kind = (request.GET.get("kind") or "").strip().upper()
         qs = InstrumentCatalog.objects.all()
         if kind:
             qs = qs.filter(kind=kind)
         if hasattr(InstrumentCatalog, "is_active"):
             qs = qs.filter(is_active=True)
-
-        results = [{"id": x.id, "text": f"{x.code} - {x.name_mn}"} for x in qs.order_by("code")]
-        return JsonResponse({"results": results})
+        return JsonResponse(
+            {"results": [{"id": x.id, "text": f"{x.code} - {x.name_mn}"} for x in qs.order_by("code")]}
+        )
 
     def location_options_view(self, request: HttpRequest):
-        """
-        device_location_filter_enterprise.js expects:
-          GET: ?aimag=<id>&sum=<id>
-          Response: [{"id":..,"name":"..."}, ...]
-        """
         aimag_id = (request.GET.get("aimag") or "").strip() or None
         sum_id = (request.GET.get("sum") or "").strip() or None
         qs = _scope_location_qs(request).order_by("name")
@@ -370,8 +381,7 @@ class DeviceAdmin(admin.ModelAdmin):
             qs = qs.filter(aimag_ref_id=aimag_id)
         if sum_id:
             qs = qs.filter(sum_ref_id=sum_id)
-        data = [{"id": l.id, "name": l.name} for l in qs]
-        return JsonResponse(data, safe=False)
+        return JsonResponse([{"id": l.id, "name": l.name} for l in qs], safe=False)
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "location":
@@ -383,20 +393,18 @@ class DeviceAdmin(admin.ModelAdmin):
         return _scope_qs(request, qs, aimag_field="location__aimag_ref")
 
     def has_delete_permission(self, request, obj=None):
-        # Аймгийн инженер delete хийхгүй
-        if request.user.is_superuser:
-            return True
-        return False
+        return request.user.is_superuser
 
 
 # ============================================================
-# Maintenance / Control (workflow + evidence)
+# Maintenance / Control
 # ============================================================
+
 @admin.register(MaintenanceService)
 class MaintenanceServiceAdmin(admin.ModelAdmin):
     list_display = ("date", "device", "workflow_status", "performer_type", "performer_engineer_name", "performer_org_name")
     list_filter = ("workflow_status", "performer_type")
-    search_fields = ("device__serial_number", "device__inventory_code", "reason", "note", "performer_engineer_name", "performer_org_name")
+    search_fields = ("device__serial_number", "device__inventory_code", "reason", "note")
     ordering = ("-date", "-id")
     inlines = [MaintenanceEvidenceInline]
 
@@ -408,16 +416,14 @@ class MaintenanceServiceAdmin(admin.ModelAdmin):
         return _scope_qs(request, qs, aimag_field="device__location__aimag_ref")
 
     def has_delete_permission(self, request, obj=None):
-        if request.user.is_superuser:
-            return True
-        return False
+        return request.user.is_superuser
 
 
 @admin.register(ControlAdjustment)
 class ControlAdjustmentAdmin(admin.ModelAdmin):
     list_display = ("date", "device", "result", "workflow_status", "performer_type", "performer_engineer_name", "performer_org_name")
     list_filter = ("result", "workflow_status", "performer_type")
-    search_fields = ("device__serial_number", "device__inventory_code", "note", "performer_engineer_name", "performer_org_name")
+    search_fields = ("device__serial_number", "device__inventory_code", "note")
     ordering = ("-date", "-id")
     inlines = [ControlEvidenceInline]
 
@@ -429,18 +435,12 @@ class ControlAdjustmentAdmin(admin.ModelAdmin):
         return _scope_qs(request, qs, aimag_field="device__location__aimag_ref")
 
     def has_delete_permission(self, request, obj=None):
-        if request.user.is_superuser:
-            return True
-        return False
+        return request.user.is_superuser
 
 
 # ============================================================
 # Spare parts
 # ============================================================
-class SparePartItemInline(admin.TabularInline):
-    model = SparePartItem
-    extra = 1
-
 
 @admin.register(SparePartOrder)
 class SparePartOrderAdmin(admin.ModelAdmin):
@@ -458,6 +458,7 @@ class SparePartOrderAdmin(admin.ModelAdmin):
 # ============================================================
 # Auth / audit
 # ============================================================
+
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
     list_display = ("user", "aimag", "org", "must_change_password")
