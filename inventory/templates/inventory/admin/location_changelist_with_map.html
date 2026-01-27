@@ -1,9 +1,7 @@
 {% extends "admin/change_list.html" %}
 {% load static %}
 
-{# =========================
-   ✅ Давхардсан default хайлт/filters-ийг бүр мөсөн арилгана
-   ========================= #}
+{# ✅ default search/filters hide #}
 {% block search %}{% endblock %}
 {% block filters %}{% endblock %}
 
@@ -14,7 +12,6 @@
   <link rel="stylesheet"
         href="{% static 'inventory/vendor/leaflet/leaflet.css' %}"
         onerror="this.onerror=null;this.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';">
-
   <script src="{% static 'inventory/vendor/leaflet/leaflet.js' %}"
           onerror="this.onerror=null;this.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';"></script>
 
@@ -25,25 +22,24 @@
   <link rel="stylesheet"
         href="{% static 'inventory/vendor/leaflet.markercluster/MarkerCluster.Default.css' %}"
         onerror="this.onerror=null;this.href='https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css';">
-
   <script src="{% static 'inventory/vendor/leaflet.markercluster/leaflet.markercluster.js' %}"
           onerror="this.onerror=null;this.src='https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js';"></script>
 
   <style>
-    /* Jazzmin контейнерийн өргөн хязгаарлалтыг суллана */
     .content-wrapper, .content, #content, .container-fluid, .container {
       max-width: 100% !important;
       width: 100% !important;
     }
 
     .locmap-wrap{ width: 100% !important; margin: 10px 0 14px 0; }
+
     #locmap{
       width: 100% !important;
       height: calc(100vh - 330px);
       min-height: 560px;
       border-radius: 12px;
       overflow: hidden;
-      border: 3px solid #000;
+      border: 1px solid rgba(0,0,0,.12);
       background: #f7f7f7;
       margin-bottom: 10px;
     }
@@ -79,7 +75,6 @@
       margin-left: 6px;
     }
 
-    /* Admin table дээрх "Харах" товч */
     a.button{
       padding: 6px 10px;
       border-radius: 6px;
@@ -88,6 +83,76 @@
       font-weight: 700;
       text-decoration: none !important;
     }
+
+    /* =========================================================
+       ✅ A) Popup card CSS нэмэлт
+       ========================================================= */
+    .loc-popup-card{
+      min-width: 260px;
+      max-width: 320px;
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid rgba(0,0,0,.12);
+      box-shadow: 0 10px 26px rgba(0,0,0,.18);
+      background: #fff;
+    }
+    .loc-popup-head{
+      padding: 10px 12px;
+      background: linear-gradient(135deg, rgba(33,150,243,.12), rgba(156,39,176,.10));
+      border-bottom: 1px solid rgba(0,0,0,.08);
+    }
+    .loc-popup-title{
+      font-weight: 900;
+      font-size: 14px;
+      margin: 0;
+    }
+    .loc-popup-sub{
+      font-size: 12px;
+      opacity: .8;
+      margin-top: 2px;
+    }
+    .loc-popup-body{
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .loc-kv{ display:flex; justify-content:space-between; gap:10px; padding:3px 0; }
+    .loc-kv b{ font-weight:800; }
+    .loc-badges{ display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+    .loc-badge{
+      display:inline-flex; align-items:center; gap:6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,0,0,.12);
+      background: rgba(0,0,0,.04);
+      font-weight: 800;
+      font-size: 11px;
+      text-decoration: none !important;
+      color: inherit !important;
+    }
+    .loc-badge.pending{ background: rgba(243,156,18,.18); border-color: rgba(243,156,18,.35); }
+    .loc-actions{
+      padding: 10px 12px;
+      border-top: 1px solid rgba(0,0,0,.08);
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .loc-btn{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding: 6px 10px;
+      border-radius: 10px;
+      text-decoration:none !important;
+      border: 1px solid rgba(0,0,0,.14);
+      background:#fff;
+      font-weight: 800;
+      font-size: 12px;
+      color: inherit !important;
+    }
+    .loc-btn.primary{ background: rgba(33,150,243,.12); border-color: rgba(33,150,243,.35); }
+    .loc-btn.warn{ background: rgba(243,156,18,.12); border-color: rgba(243,156,18,.35); }
   </style>
 {% endblock %}
 
@@ -96,15 +161,20 @@
   <div class="locmap-wrap">
     <div id="locmap"></div>
 
-    <!-- ✅ Custom filter bar (URL params -> server-side filter) -->
     <div class="locbar">
       <select id="f_type"><option value="">Байршлын төрөл</option></select>
       <select id="f_aimag"><option value="">Аймаг</option></select>
       <select id="f_sum"><option value="">Сум/Дүүрэг</option></select>
       <select id="f_org"><option value="">Хариуцагч</option></select>
 
-      <input id="f_q" type="text" placeholder="Хайх..." />
-      <button id="btn_apply" type="button">Хайлт</button>
+      <!-- ✅ Pending only toggle -->
+      <label style="display:flex;gap:8px;align-items:center;font-weight:800;margin-left:4px;">
+        <input type="checkbox" id="onlyPending">
+        Зөвхөн Pending
+      </label>
+
+      <input id="f_q_local" type="text" placeholder="Map дээр хайх..." />
+      <button id="btn_apply" type="button">Хайлт (Server)</button>
 
       <span class="small" id="loc_counts"></span>
     </div>
@@ -122,12 +192,26 @@
         const u = new URL(window.location.href);
         return u.searchParams.get(name) || "";
       }
-      function setParam(name, val){
+      function setParamBulk(pairs){
         const u = new URL(window.location.href);
-        if (!val) u.searchParams.delete(name);
-        else u.searchParams.set(name, val);
-        u.searchParams.delete("p"); // paging reset
+        for (const [name,val] of pairs){
+          if (!val) u.searchParams.delete(name);
+          else u.searchParams.set(name, val);
+        }
+        u.searchParams.delete("p");
         window.location.href = u.toString();
+      }
+
+      /* =========================================================
+         ✅ C) escapeHtml() helper (нэг удаа)
+         ========================================================= */
+      function escapeHtml(s){
+        return String(s ?? "")
+          .replaceAll("&","&amp;")
+          .replaceAll("<","&lt;")
+          .replaceAll(">","&gt;")
+          .replaceAll('"',"&quot;")
+          .replaceAll("'","&#39;");
       }
 
       // ---- Parse JSON ----
@@ -140,7 +224,7 @@
         RAW = [];
       }
       const POINTS = Array.isArray(RAW) ? RAW : Object.values(RAW || {});
-      $("loc_counts").textContent = `Харагдахуй: ${POINTS.length}`;
+      $("loc_counts").textContent = `Нийт: ${POINTS.length}`;
 
       if (!window.L) {
         console.error("Leaflet not loaded.");
@@ -154,29 +238,84 @@
         attribution: "&copy; OpenStreetMap contributors"
       }).addTo(map);
 
+      // ✅ Type mapping: DB дээр өөр нэр ирсэн ч стандарт 8 төрөл рүү хувиргана
+      const TYPE_ALIAS = {
+        "METEO":"WEATHER",
+        "WEATHER_STATION":"WEATHER",
+        "STATION":"WEATHER",
+        "CLIMATE":"WEATHER",
+
+        "AUTO":"AWS",
+        "AUTOMATIC":"AWS",
+
+        "HYDROLOGY":"HYDRO",
+
+        "AER":"AEROLOGY",
+        "UPPERAIR":"AEROLOGY",
+
+        "AGRICULTURE":"AGRO",
+
+        "REFERENCE":"ETALON",
+        "CAL":"ETALON",
+      };
+
       const TYPE_COLOR = {
         "WEATHER":"#4b3bff","AWS":"#f2b233","HYDRO":"#1f8f3a","AEROLOGY":"#a000c8",
         "AGRO":"#6a5a2a","ETALON":"#c0392b","RADAR":"#ff3b30","OTHER":"#7f8c8d"
       };
+
       function normType(t){
         t = (t || "").toString().trim().toUpperCase();
+        t = TYPE_ALIAS[t] || t;
         return TYPE_COLOR[t] ? t : "OTHER";
       }
-      function markerIcon(color){
+
+      /* =========================================================
+         ✅ Pending highlight icon (divIcon)
+         - pending_total > 0 үед улбар outline + badge тоо
+         ========================================================= */
+      function makeIcon(p){
+        const t = normType(p.type);
+        const fill = TYPE_COLOR[t] || TYPE_COLOR.OTHER;
+
+        const pt = Number(p.pending_total || 0);
+        const pending = pt > 0;
+
+        const outline = pending
+          ? "0 0 0 3px rgba(243,156,18,.70)"
+          : "0 0 0 2px rgba(0,0,0,.20)";
+
+        const badge = pending
+          ? `<div style="
+              position:absolute; top:-9px; right:-9px;
+              min-width:18px; height:18px; padding:0 5px;
+              border-radius:999px; background:#f39c12; color:#fff;
+              font-weight:900; font-size:11px;
+              display:flex; align-items:center; justify-content:center;
+              border:2px solid #fff;
+              box-shadow:0 2px 10px rgba(0,0,0,.25);
+            ">${pt}</div>`
+          : "";
+
         return L.divIcon({
-          className: "",
-          html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid rgba(0,0,0,.35);box-shadow:0 2px 6px rgba(0,0,0,.25)"></div>`,
-          iconSize: [14,14],
-          iconAnchor: [7,7],
-          popupAnchor: [0,-8]
+          className: "loc-pin",
+          html: `<div style="position:relative;width:14px;height:14px;">
+            <div style="
+              width:14px;height:14px;border-radius:50%;
+              background:${fill};
+              box-shadow:${outline}, 0 6px 16px rgba(0,0,0,.22);
+            "></div>
+            ${badge}
+          </div>`,
+          iconSize: [14, 14],
+          iconAnchor: [7, 7],
+          popupAnchor: [0, -7],
         });
       }
 
-      // ---- Cluster group ----
       const hasCluster = !!(L.markerClusterGroup);
       const cluster = hasCluster ? L.markerClusterGroup({ chunkedLoading: true }) : null;
 
-      // ---- Select option helpers ----
       function uniqBy(arr, keyFn){
         const m = new Map();
         for (const x of arr){
@@ -200,7 +339,6 @@
         }
       }
 
-      // Build type/aimag/org lists (ID-тай!)
       const types = uniqBy(
         POINTS.map(p => ({id:normType(p.type), name:normType(p.type)})),
         x => x.id
@@ -229,32 +367,38 @@
         fillSelect($("f_sum"), sums, "Сум/Дүүрэг");
       }
 
-      // ---- Restore values from URL params (admin server-side filters) ----
-      $("f_type").value = getParam("location_type__exact");
+      // ---- Restore from URL (server-side) ----
+      $("f_type").value = getParam("location_type__exact"); // server filter uses raw, but OK for initial UX
       $("f_aimag").value = getParam("aimag_ref__id__exact");
       $("f_org").value = getParam("owner_org__id__exact");
-      $("f_q").value = getParam("q");
-
       buildSumsForAimag($("f_aimag").value);
       $("f_sum").value = getParam("sum_ref__id__exact");
 
       $("f_aimag").addEventListener("change", () => {
         buildSumsForAimag($("f_aimag").value);
         $("f_sum").value = "";
+        renderMarkers();
       });
 
-      // ✅ Apply -> server-side filter (table + map reload)
+      // ✅ Server-side apply (table + map reload)
       $("btn_apply").addEventListener("click", () => {
-        setParam("location_type__exact", $("f_type").value);
-        setParam("aimag_ref__id__exact", $("f_aimag").value);
-        setParam("sum_ref__id__exact", $("f_sum").value);
-        setParam("owner_org__id__exact", $("f_org").value);
-        setParam("q", ($("f_q").value || "").trim());
+        setParamBulk([
+          ["location_type__exact", $("f_type").value],
+          ["aimag_ref__id__exact", $("f_aimag").value],
+          ["sum_ref__id__exact", $("f_sum").value],
+          ["owner_org__id__exact", $("f_org").value],
+          ["q", ""],
+        ]);
       });
 
-      // ---- Marker click -> admin edit page ----
-      function adminChangeUrl(id){
-        return `/django-admin/inventory/location/${id}/change/`;
+      function getAdminUrl(p){
+        // ✅ payload дотор байгаа loc_admin_url-ийг ашиглана (hardcode биш)
+        return (p && p.loc_admin_url) ? p.loc_admin_url : null;
+      }
+
+      function getDeviceUrl(p){
+        // ✅ payload дотор байгаа device_list_url-ийг ашиглана
+        return (p && p.device_list_url) ? p.device_list_url : null;
       }
 
       let markerLayers = [];
@@ -268,47 +412,99 @@
         const selType = $("f_type").value;
         const selAimag = $("f_aimag").value;
         const selSum = $("f_sum").value;
+        const qLocal = ($("f_q_local").value || "").trim().toLowerCase();
 
-        const visible = [];
+        // ✅ Pending only toggle
+        const onlyPendingEl = $("onlyPending");
+        const onlyPending = !!(onlyPendingEl && onlyPendingEl.checked);
 
+        const visibleMarkers = [];
         for (const p of POINTS){
           const lat = Number(p.lat), lon = Number(p.lon);
           if (!isFinite(lat) || !isFinite(lon)) continue;
 
+          // local filters (map only)
           if (selOrg && String(p.org_id||"") !== String(selOrg)) continue;
           if (selType && normType(p.type) !== selType) continue;
           if (selAimag && String(p.aimag_id||"") !== String(selAimag)) continue;
           if (selSum && String(p.sum_id||"") !== String(selSum)) continue;
 
-          const t = normType(p.type);
-          const m = L.marker([lat, lon], { icon: markerIcon(TYPE_COLOR[t]), title: p.name || "" });
+          if (qLocal){
+            const hay = `${p.name||""} ${p.aimag||""} ${p.sum||""} ${p.org||""} ${p.district||""} ${p.wmo||""}`.toLowerCase();
+            if (!hay.includes(qLocal)) continue;
+          }
 
-          m.on("click", () => { window.location.href = adminChangeUrl(p.id); });
+          // ✅ pending filter (map only)
+          const pm = Number(p.pending_maintenance || 0);
+          const pc = Number(p.pending_control || 0);
+          const pt = Number(p.pending_total || (pm + pc) || 0);
+          if (onlyPending && pt <= 0) continue;
+
+          const m = L.marker([lat, lon], { icon: makeIcon(p), title: p.name || "" });
+
+          /* =========================================================
+             ✅ B) PopupHtml-ийг card болгож солих
+             ========================================================= */
+          const locUrl = getAdminUrl(p) || "";
+          const devUrl = getDeviceUrl(p) || "";
+
+          const dc = Number(p.device_count || 0);
+
+          const popupHtml = `
+            <div class="loc-popup-card">
+              <div class="loc-popup-head">
+                <div class="loc-popup-title">${escapeHtml(p.name || "")}</div>
+                <div class="loc-popup-sub">
+                  ${escapeHtml(p.aimag || "-")} • ${escapeHtml(p.sum || p.district || "-")}
+                </div>
+              </div>
+
+              <div class="loc-popup-body">
+                <div class="loc-kv"><b>Байгууллага</b><span>${escapeHtml(p.org || "-")}</span></div>
+                <div class="loc-kv"><b>Төрөл</b><span>${escapeHtml(p.location_type || p.type || "-")}</span></div>
+
+                <div class="loc-badges">
+                  ${devUrl ? `<a class="loc-badge" href="${devUrl}" title="Devices жагсаалт">${dc} багаж</a>` : `<span class="loc-badge">${dc} багаж</span>`}
+                  ${pt > 0 ? `<span class="loc-badge pending">⏳ Pending: ${pt} (MS:${pm}, CA:${pc})</span>` : `<span class="loc-badge">✅ Pending: 0</span>`}
+                </div>
+              </div>
+
+              <div class="loc-actions">
+                ${locUrl ? `<a class="loc-btn primary" href="${locUrl}">📍 Location</a>` : ""}
+                ${devUrl ? `<a class="loc-btn warn" href="${devUrl}">🧰 Devices</a>` : ""}
+              </div>
+            </div>
+          `;
+
+          m.bindPopup(popupHtml);
           m.bindTooltip(p.name || "-", { direction:"top", offset:[0,-8], opacity:0.9 });
 
-          visible.push(m);
+          visibleMarkers.push(m);
         }
 
         if (cluster){
-          visible.forEach(m => cluster.addLayer(m));
+          visibleMarkers.forEach(m => cluster.addLayer(m));
           cluster.addTo(map);
         } else {
-          visible.forEach(m => { m.addTo(map); markerLayers.push(m); });
+          visibleMarkers.forEach(m => { m.addTo(map); markerLayers.push(m); });
         }
 
-        const group = visible.length ? L.featureGroup(visible) : null;
-        if (group){
+        if (visibleMarkers.length){
+          const group = L.featureGroup(visibleMarkers);
           map.fitBounds(group.getBounds().pad(0.10));
         } else {
           map.setView([47.9, 106.9], 5);
         }
 
-        $("loc_counts").textContent = `Харагдахуй: ${visible.length} / ${POINTS.length} (локал шүүлтүүр)`;
+        $("loc_counts").textContent = `Map: ${visibleMarkers.length} / ${POINTS.length}`;
       }
 
-      ["f_org","f_type","f_aimag","f_sum"].forEach(id => {
-        $(id).addEventListener("change", () => renderMarkers());
-      });
+      ["f_org","f_type","f_sum"].forEach(id => $(id).addEventListener("change", renderMarkers));
+      $("f_q_local").addEventListener("input", () => { renderMarkers(); });
+
+      // ✅ pending toggle -> rerender
+      const onlyPendingEl = $("onlyPending");
+      if (onlyPendingEl) onlyPendingEl.addEventListener("change", renderMarkers);
 
       renderMarkers();
       setTimeout(() => { try { map.invalidateSize(); } catch(e){} }, 180);

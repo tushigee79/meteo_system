@@ -148,6 +148,60 @@
       top: 66px;
     }
   }
+
+
+  /* ===== Marker pulse (Pending > 0) ===== */
+  .loc-pin .pin-wrap{ position:relative; width:14px; height:14px; }
+  .loc-pin .pin-dot{
+    width:14px; height:14px; border-radius:50%;
+    box-shadow:0 2px 8px rgba(0,0,0,.25);
+  }
+  .loc-pin .pin-badge{
+    position:absolute; top:-8px; right:-8px;
+    min-width:18px; height:18px;
+    padding:0 5px;
+    border-radius:999px;
+    background:#f59e0b; color:#fff;
+    font-weight:800; font-size:11px;
+    display:flex; align-items:center; justify-content:center;
+    border:2px solid #fff;
+    box-shadow:0 2px 8px rgba(0,0,0,.25);
+    line-height:1;
+  }
+  .loc-pin.pulse .pulse-ring{
+    position:absolute;
+    left:50%; top:50%;
+    width:14px; height:14px;
+    transform:translate(-50%,-50%);
+    border-radius:999px;
+    border:2px solid rgba(245,158,11,.85);
+    animation: locPulse 1.35s ease-out infinite;
+    pointer-events:none;
+  }
+  @keyframes locPulse{
+    0%   { transform:translate(-50%,-50%) scale(1);   opacity:.85; }
+    70%  { transform:translate(-50%,-50%) scale(2.35); opacity:0; }
+    100% { transform:translate(-50%,-50%) scale(2.35); opacity:0; }
+  }
+
+  /* ===== Popup: Pending badge + links ===== */
+  .pending-badge{
+    display:inline-flex; align-items:center; justify-content:center;
+    min-width:22px; height:18px; padding:0 7px;
+    border-radius:999px; font-weight:800; font-size:11px;
+    color:#fff; line-height:1;
+    vertical-align:middle;
+  }
+  .pending-badge.is-pending{ background:#f59e0b; }
+  .pending-badge.is-zero{ background:#9ca3af; }
+  .pending-links a{
+    text-decoration:none;
+    margin-left:6px;
+    padding:2px 7px;
+    border-radius:999px;
+    border:1px solid rgba(0,0,0,.18);
+    font-size:11px;
+  }
 </style>
 {% endblock %}
 
@@ -214,6 +268,22 @@
           <div class="legend-item" data-status="OK"><span class="dot" style="background:#2ecc71;"></span> ✅ Хэвийн</div>
           <div class="legend-item" data-status="BROKEN"><span class="dot" style="background:#e74c3c;"></span> ⚠️ Эвдрэлтэй</div>
           <div class="legend-item" data-status="EMPTY"><span class="dot" style="background:#95a5a6;"></span> ⭕ Багажгүй</div>
+        <div class="legend" id="legendPriority">
+          <div class="legend-title">Маркер өнгө (priority)</div>
+          <div class="legend-item" style="cursor:default;">
+            <span class="dot" style="background:#f59e0b;"></span> 🟠 Pending workflow
+          </div>
+          <div class="legend-item" style="cursor:default;">
+            <span class="dot" style="background:#ef4444;"></span> 🔴 Эвдэрсэн
+          </div>
+          <div class="legend-item" style="cursor:default;">
+            <span class="dot" style="background:#9ca3af;"></span> ⚪ Багажгүй
+          </div>
+          <div class="legend-item" style="cursor:default;">
+            <span class="dot" style="background:#22c55e;"></span> 🟢 Хэвийн
+          </div>
+        </div>
+
         </div>
       </div>
     </div>
@@ -276,48 +346,74 @@
   function getTitle(p){
     return normText(p.name ?? p.location_name ?? p.title) || "Unnamed";
   }
+  function makeIcon(color, pendingCount, status){
+    // status border (legend-тэй ижил)
+    const statusBorder =
+      status === "BROKEN" ? "#e74c3c" :
+      status === "EMPTY"  ? "#95a5a6" :
+                            "#2ecc71";
 
-  function makeIcon(color){
+    const hasPending = (pendingCount && pendingCount > 0);
+
+    const badge = hasPending
+      ? `<div class="pin-badge">${pendingCount}</div>`
+      : "";
+
+    const ring = hasPending ? `<div class="pulse-ring"></div>` : "";
+
     return L.divIcon({
-      className: "loc-pin",
-      html: `<div style="
-        width:12px;height:12px;border-radius:50%;
-        background:${color};
-        border:2px solid #fff;
-        box-shadow:0 2px 8px rgba(0,0,0,.25);
-      "></div>`,
-      iconSize: [12, 12],
-      iconAnchor: [6, 6],
-      popupAnchor: [0, -6],
+      className: hasPending ? "loc-pin pulse" : "loc-pin",
+      html: `<div class="pin-wrap">
+        ${ring}
+        <div class="pin-dot" style="background:${color};border:2px solid ${statusBorder};"></div>
+        ${badge}
+      </div>`,
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+      popupAnchor: [0, -7],
     });
   }
 
   // ---- Map init ----
-  const map = L.map("locmap", { zoomControl: true });
+const map = L.map("locmap", { zoomControl: true });
 
-  // Safe tile layer (OSM -> Carto fallback)
-  if (typeof addSafeTileLayer === "function") {
-    addSafeTileLayer(map);
-  } else {
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap contributors",
-      crossOrigin: true,
-    }).addTo(map);
-  }
+// Safe tile layer (OSM -> Carto fallback)
+if (typeof addSafeTileLayer === "function") {
+  addSafeTileLayer(map);
+} else {
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors",
+    crossOrigin: true,
+  }).addTo(map);
+}
 
-  function invalidateLater(){ try { map.invalidateSize(true); } catch(e) {} }
-  setTimeout(invalidateLater, 50);
-  setTimeout(invalidateLater, 250);
-  setTimeout(invalidateLater, 900);
-  window.addEventListener("resize", () => setTimeout(invalidateLater, 50));
+function invalidateLater(delay = 50) {
+  setTimeout(() => {
+    try { map.invalidateSize(true); } catch (e) {}
+  }, delay);
+}
 
-  document.addEventListener("click", (ev) => {
-    const t = ev.target;
-    if (t && t.closest && (t.closest("[data-widget='pushmenu']") || t.closest(".sidebar-toggle") || t.closest(".navbar-toggler"))) {
-      setTimeout(invalidateLater, 300);
-    }
-  });
+// эхлэхдээ хэд хэдэн удаа
+invalidateLater(50);
+invalidateLater(250);
+invalidateLater(900);
+
+// resize үед
+window.addEventListener("resize", () => invalidateLater(50));
+
+// sidebar/pushmenu toggle дараа
+document.addEventListener("click", (ev) => {
+  const t = ev.target;
+  const hit =
+    t && t.closest &&
+    (t.closest("[data-widget='pushmenu']") ||
+     t.closest(".sidebar-toggle") ||
+     t.closest(".navbar-toggler"));
+
+  if (hit) invalidateLater(300);
+});
+
 
   const cluster = (L.markerClusterGroup ? L.markerClusterGroup() : L.layerGroup());
   map.addLayer(cluster);
@@ -338,13 +434,54 @@
     const aimag = getAimagName(p);
     const org = getOrgName(p);
 
+    const deviceCount = Number(p.device_count ?? p.deviceCount ?? 0) || 0;
+    const pendingMaint = Number(p.pending_maintenance ?? p.pendingMaint ?? 0) || 0;
+    const pendingCtrl  = Number(p.pending_control ?? p.pendingCtrl ?? 0) || 0;
+    const pendingTotal = Number(p.pending_total ?? (pendingMaint + pendingCtrl) ?? 0) || 0;
+    const lastMaint = (p.last_maintenance_date ?? p.lastMaintenanceDate ?? "");
+    const lastCtrl  = (p.last_control_date ?? p.lastControlDate ?? "");
+
     aimags.add(aimag);
     orgs.add(org);
 
-    const icon = makeIcon(TYPE_COLORS[t] || TYPE_COLORS.OTHER);
+    // --- Marker color priority (pending > broken > empty > ok) ---
+    let markerColor = TYPE_COLORS[t] || TYPE_COLORS.OTHER;
 
-    const locUrl = p.loc_admin_url || p.location_url || p.admin_url || p.url || "";
+    // 🔶 Pending workflow priority
+    if (Number(pendingTotal || 0) > 0) {
+      markerColor = "#f59e0b"; // orange
+    }
+    // 🔴 Broken
+    else if (st === "BROKEN") {
+      markerColor = "#ef4444";
+    }
+    // ⚪ No devices
+    else if (st === "EMPTY") {
+      markerColor = "#9ca3af";
+    }
+    // 🟢 OK
+    else {
+      markerColor = "#22c55e";
+    }
+
+    const priorityKey = (pendingTotal > 0) ? "PENDING" : (st === "BROKEN" ? "BROKEN" : (st === "EMPTY" ? "EMPTY" : "OK"));
+
+    const icon = makeIcon(markerColor, pendingTotal, st);
+const locUrl = p.loc_admin_url || p.location_url || p.admin_url || p.url || "";
     const devUrl = p.device_list_url || "";
+
+    // Pending lists (Admin changelist links)
+    const locId = (p.id ?? p.pk ?? p.location_id ?? p.locationId ?? "");
+    const msUrl = locId ? `/admin/inventory/maintenanceservice/?device__location__id__exact=${locId}&workflow_status__exact=SUBMITTED` : "";
+    const caUrl = locId ? `/admin/inventory/controladjustment/?device__location__id__exact=${locId}&workflow_status__exact=SUBMITTED` : "";
+
+
+    const pm = Number(p.pending_maintenance || 0);
+    const pc = Number(p.pending_control || 0);
+    const pt = Number(p.pending_total || 0);
+
+    const lm = p.last_maintenance_date ? String(p.last_maintenance_date).slice(0,10) : "";
+    const lc = p.last_control_date ? String(p.last_control_date).slice(0,10) : "";
 
     const popupHtml = `
       <div style="min-width:220px;">
@@ -354,7 +491,16 @@
           <div><b>Байгууллага:</b> ${org || "-"}</div>
           <div><b>Төрөл:</b> ${t}</div>
           <div><b>Төлөв:</b> ${st}</div>
+
           <div><b>Коорд:</b> ${lat.toFixed(5)}, ${lng.toFixed(5)}</div>
+
+          <div><b>Pending:</b> <span class="pending-badge ${pt > 0 ? "is-pending" : "is-zero"}">${pt}</span>${(pt > 0 && (msUrl || caUrl)) ? `<span class="pending-links">${msUrl ? `<a href="${msUrl}">MS</a>` : ""}${caUrl ? `<a href="${caUrl}">CA</a>` : ""}</span>` : ""}</div>
+
+          <div style="opacity:.8;"><b>Дэлгэрэнгүй:</b> MS:${pm}, CA:${pc}</div>
+
+          <div><b>Сүүлийн засвар:</b> ${lm || "-"}</div>
+
+          <div><b>Сүүлийн хяналт:</b> ${lc || "-"}</div>
         </div>
         <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
           ${locUrl ? `<a href="${locUrl}" style="text-decoration:none;padding:6px 10px;border-radius:10px;border:1px solid rgba(0,0,0,.15);">Location</a>` : ""}
@@ -365,7 +511,7 @@
 
     const m = L.marker([lat, lng], { icon, title }).bindPopup(popupHtml);
     cluster.addLayer(m);
-    markers.push({ marker: m, data: { ...p, _type:t, _status:st, _title:title, _aimag:aimag, _org:org } });
+    markers.push({ marker: m, data: { ...p, _type:t, _status:st, _title:title, _aimag:aimag, _org:org, _priority: priorityKey } });
   }
 
   if (markers.length){
@@ -397,8 +543,29 @@
   fillSelect(aimagFilter, aimags);
   fillSelect(orgFilter, orgs);
 
+  loadQS();
+  // ---- Querystring sync (share линк) ----
+  function loadQS(){
+    const p = new URLSearchParams(location.search);
+    const a = p.get("aimag"); if (a !== null) aimagFilter.value = a;
+    const t = p.get("type");  if (t !== null) typeFilter.value = t;
+    const o = p.get("org");   if (o !== null) orgFilter.value = o;
+    const q = p.get("q");     if (q !== null) nameSearch.value = q;
+  }
+
+  function setQS(){
+    const p = new URLSearchParams(location.search);
+    p.set("aimag", aimagFilter.value || "");
+    p.set("type",  typeFilter.value  || "");
+    p.set("org",   orgFilter.value   || "");
+    p.set("q",     nameSearch.value  || "");
+    history.replaceState(null, "", "?" + p.toString());
+  }
+
+
   const enabledTypes = new Set(Object.keys(TYPE_COLORS));
   const enabledStatus = new Set(["OK","BROKEN","EMPTY"]);
+  const enabledPriority = new Set(["PENDING","BROKEN","EMPTY","OK"]);
 
   function matchFilters(d){
     const af = aimagFilter.value;
@@ -412,6 +579,7 @@
 
     if (!enabledTypes.has(d._type)) return false;
     if (!enabledStatus.has(d._status)) return false;
+    if (!enabledPriority.has(d._priority)) return false;
 
     if (q && !d._title.toLowerCase().includes(q)) return false;
     return true;
@@ -432,6 +600,7 @@
       map.fitBounds(group.getBounds().pad(0.15));
     }
     setTimeout(invalidateLater, 50);
+    setQS();
   }
 
   [aimagFilter, typeFilter, orgFilter].forEach(el => el.addEventListener("change", apply));
@@ -449,8 +618,11 @@
     enabledTypes.clear(); Object.keys(TYPE_COLORS).forEach(t=>enabledTypes.add(t));
     enabledStatus.clear(); ["OK","BROKEN","EMPTY"].forEach(s=>enabledStatus.add(s));
 
+    enabledPriority.clear(); ["PENDING","BROKEN","EMPTY","OK"].forEach(s=>enabledPriority.add(s));
+
     document.querySelectorAll("#legendType .legend-item").forEach(el=>el.classList.remove("inactive"));
     document.querySelectorAll("#legendStatus .legend-item").forEach(el=>el.classList.remove("inactive"));
+    document.querySelectorAll("#legendPriority .legend-item").forEach(el=>el.classList.remove("inactive"));
     apply();
   });
 
@@ -460,6 +632,17 @@
       if (!t) return;
       if (enabledTypes.has(t)) { enabledTypes.delete(t); el.classList.add("inactive"); }
       else { enabledTypes.add(t); el.classList.remove("inactive"); }
+      apply();
+    });
+  });
+
+
+  document.querySelectorAll("#legendPriority .legend-item").forEach(el => {
+    el.addEventListener("click", () => {
+      const pkey = el.getAttribute("data-priority");
+      if (!pkey) return;
+      if (enabledPriority.has(pkey)) { enabledPriority.delete(pkey); el.classList.add("inactive"); }
+      else { enabledPriority.add(pkey); el.classList.remove("inactive"); }
       apply();
     });
   });
