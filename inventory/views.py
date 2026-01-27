@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Max
 from django.http import HttpResponse, JsonResponse
 from django.urls import reverse
 from django.views.decorators.http import require_GET
@@ -20,7 +20,7 @@ from django.http import HttpRequest
 
 from .models import (
     Location, Organization, Device, Aimag, SumDuureg,
-    InstrumentCatalog, UserProfile
+    InstrumentCatalog, UserProfile, MaintenanceService, ControlAdjustment
 )
 
 ADMIN_NS = "admin"
@@ -103,7 +103,9 @@ def station_map_view(request):
 
     scope = _get_user_scope(request)
 
-    qs = Location.objects.select_related("aimag_ref", "sum_ref", "owner_org").annotate(device_count=Count("devices"))
+    org_field = "organization" if hasattr(Location, "organization") else "owner_org"
+
+    qs = Location.objects.select_related("aimag_ref", "sum_ref", org_field).annotate(device_count=Count("devices"))
     if not scope.get("all"):
         if scope.get("aimag_id"):
             qs = qs.filter(aimag_ref_id=scope["aimag_id"])
@@ -118,7 +120,7 @@ def station_map_view(request):
     except Exception:
         lat, lon = None, None
 
-    org = getattr(loc, "owner_org", None)
+    org = getattr(loc, org_field, None)
     org_name = getattr(org, "name", "") if org else ""
 
     loc_admin_url = ""
@@ -178,47 +180,107 @@ def station_map_view(request):
 
 @staff_member_required
 def location_map(request):
-    """Бүх станцыг нэгдсэн газрын зураг дээр төлөвөөр нь ялгаж харуулах"""
-    scope = _get_user_scope(request) # Таны өмнөх scope логик
+    """Бүх станцыг нэгдсэн газрын зураг дээр төрөл + төлөв + workflow ачааллаар нь харуулах"""
+    scope = _get_user_scope(request)  # таны өмнөх scope логик
 
-    # Coordinate-той бүх байршлыг төхөөрөмжүүдтэй нь хамт унших
-    qs = (
+    # ✅ Organization field-ийн хоёр хувилбарыг хоёуланг нь дэмжинэ
+    org_field = "organization" if hasattr(Location, "organization") else "owner_org"
+
+    base_qs = (
         Location.objects
         .exclude(latitude__isnull=True).exclude(longitude__isnull=True)
-        .select_related("aimag_ref", "sum_ref", "owner_org")
+        .select_related("aimag_ref", "sum_ref", org_field)
         .prefetch_related("devices")
     )
 
-    if not scope.get("all"):
-        if scope.get("aimag_id"):
-            qs = qs.filter(aimag_ref_id=scope["aimag_id"])
+    if not scope.get("all") and scope.get("aimag_id"):
+        base_qs = base_qs.filter(aimag_ref_id=scope["aimag_id"])
+
+    # --- Pending workflow counts (N+1 үүсгэхгүй) ---
+    # Pending гэж: APPROVED биш бүх төлөв (DRAFT/SUBMITTED/REJECTED)
+    pending_ms = dict(
+        MaintenanceService.objects
+        .filter(device__location__in=base_qs)
+        .exclude(workflow_status="APPROVED")
+        .values_list("device__location_id")
+        .annotate(c=Count("id"))
+    )
+    pending_ca = dict(
+        ControlAdjustment.objects
+        .filter(device__location__in=base_qs)
+        .exclude(workflow_status="APPROVED")
+        .values_list("device__location_id")
+        .annotate(c=Count("id"))
+    )
+
+    # --- Last activity dates (optional боловч popup-д хэрэгтэй) ---
+    last_ms = dict(
+        MaintenanceService.objects
+        .filter(device__location__in=base_qs)
+        .values_list("device__location_id")
+        .annotate(d=Max("date"))
+    )
+    last_ca = dict(
+        ControlAdjustment.objects
+        .filter(device__location__in=base_qs)
+        .values_list("device__location_id")
+        .annotate(d=Max("date"))
+    )
 
     points = []
-    for loc in qs:
+    for loc in base_qs:
         try:
             lat, lon = float(loc.latitude), float(loc.longitude)
         except (TypeError, ValueError):
             continue
 
-        # Станцын төлөвийг тодорхойлох логик
         devs = loc.devices.all()
-        status_color = "green" # Хэвийн
-        if devs.filter(status__in=["Broken", "Repair"]).exists():
-            status_color = "red"   # Эвдрэлтэй
-        elif devs.count() == 0:
-            status_color = "gray"  # Багажгүй
+
+        # --- Station status (legendStatus-д тааруулсан) ---
+        status = "OK"
+        if devs.count() == 0:
+            status = "EMPTY"
+        elif devs.filter(status__in=["Broken", "Repair"]).exists():
+            status = "BROKEN"
+
+        org_obj = getattr(loc, org_field, None)
+        org_name = getattr(org_obj, "name", "") if org_obj else ""
+
+        pm = int(pending_ms.get(loc.id, 0) or 0)
+        pc = int(pending_ca.get(loc.id, 0) or 0)
 
         points.append({
             "id": loc.id,
             "name": loc.name,
             "lat": lat,
             "lon": lon,
-            "color": status_color, # Өнгөөр ялгах талбар
+
             "type": loc.location_type,
+            "location_type": loc.location_type,
+
             "aimag": loc.aimag_ref.name if loc.aimag_ref else "Тодорхойгүй",
+
+            # ✅ Байгууллага filter
+            "org": org_name,
+            "organization_name": org_name,
+
             "device_count": devs.count(),
+
+            # ✅ Status legend
+            "status": status,
+            "device_status": status,
+
+            # ✅ Workflow ачаалал
+            "pending_maintenance": pm,
+            "pending_control": pc,
+            "pending_total": pm + pc,
+
+            # ✅ Сүүлийн огноонууд (map popup-д хэрэгтэй)
+            "last_maintenance_date": (last_ms.get(loc.id) or None),
+            "last_control_date": (last_ca.get(loc.id) or None),
+
             "loc_admin_url": reverse(f"{ADMIN_NS}:inventory_location_change", args=[loc.id]),
-            "device_list_url": reverse(f"{ADMIN_NS}:inventory_device_changelist") + f"?location__id__exact={loc.id}"
+            "device_list_url": reverse(f"{ADMIN_NS}:inventory_device_changelist") + f"?location__id__exact={loc.id}",
         })
 
     context = {
@@ -227,6 +289,7 @@ def location_map(request):
         "locations_json": json.dumps(points, cls=DjangoJSONEncoder),
     }
     return render(request, "inventory/location_map.html", context)
+
 
 @staff_member_required
 def device_import_csv(request):
@@ -374,3 +437,69 @@ def admin_data_entry(request: HttpRequest):
         ],
     }
     return render(request, "admin/data_entry.html", context)
+
+from django.contrib.admin.views.decorators import staff_member_required
+
+@staff_member_required
+def location_map_one(request, location_id: int):
+    # ✅ existing location_map view-г reuse хийнэ.
+    # location_map.html template чинь focus_id-г дэмждэг бол түүн рүү дамжуулна.
+    response = location_map(request)
+    # render() response дээр context шууд нэмэх боломжгүй тул
+    # хамгийн энгийнээр: location_map-г хуулбарлаад focus_id нэмдэг болгоно.
+    # (Доорх нь "copy-paste safe" хувилбар.)
+
+    scope = _get_user_scope(request)
+
+    qs = (
+        Location.objects
+        .exclude(latitude__isnull=True).exclude(longitude__isnull=True)
+        .select_related("aimag_ref", "sum_ref", "owner_org")
+        .prefetch_related("devices")
+    )
+
+    if not scope.get("all") and scope.get("aimag_id"):
+        qs = qs.filter(aimag_ref_id=scope["aimag_id"])
+
+    qs = qs.filter(id=location_id)
+
+    points = []
+    for loc in qs:
+        try:
+            lat, lon = float(loc.latitude), float(loc.longitude)
+        except (TypeError, ValueError):
+            continue
+
+        devs = loc.devices.all()
+        status = "OK"
+        if devs.count() == 0:
+            status = "EMPTY"
+        elif devs.filter(status__in=["Broken", "Repair"]).exists():
+            status = "BROKEN"
+
+        org_name = getattr(getattr(loc, "owner_org", None), "name", "") or ""
+
+        points.append({
+            "id": loc.id,
+            "name": loc.name,
+            "lat": lat,
+            "lon": lon,
+            "type": loc.location_type,
+            "location_type": loc.location_type,
+            "aimag": loc.aimag_ref.name if loc.aimag_ref else "Тодорхойгүй",
+            "org": org_name,
+            "organization_name": org_name,
+            "device_count": devs.count(),
+            "status": status,
+            "device_status": status,
+            "loc_admin_url": reverse(f"{ADMIN_NS}:inventory_location_change", args=[loc.id]),
+            "device_list_url": reverse(f"{ADMIN_NS}:inventory_device_changelist") + f"?location__id__exact={loc.id}",
+        })
+
+    context = {
+        **dj_admin.site.each_context(request),
+        "title": "Байршил (Газрын зураг)",
+        "locations_json": json.dumps(points, cls=DjangoJSONEncoder),
+        "focus_id": location_id,
+    }
+    return render(request, "inventory/location_map.html", context)
