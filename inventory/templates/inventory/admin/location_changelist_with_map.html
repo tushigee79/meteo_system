@@ -1,0 +1,317 @@
+{% extends "admin/change_list.html" %}
+{% load static %}
+
+{# =========================
+   ✅ Давхардсан default хайлт/filters-ийг бүр мөсөн арилгана
+   ========================= #}
+{% block search %}{% endblock %}
+{% block filters %}{% endblock %}
+
+{% block extrahead %}
+  {{ block.super }}
+
+  <!-- Leaflet (local -> CDN fallback) -->
+  <link rel="stylesheet"
+        href="{% static 'inventory/vendor/leaflet/leaflet.css' %}"
+        onerror="this.onerror=null;this.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';">
+
+  <script src="{% static 'inventory/vendor/leaflet/leaflet.js' %}"
+          onerror="this.onerror=null;this.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';"></script>
+
+  <!-- MarkerCluster (local -> CDN fallback) -->
+  <link rel="stylesheet"
+        href="{% static 'inventory/vendor/leaflet.markercluster/MarkerCluster.css' %}"
+        onerror="this.onerror=null;this.href='https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css';">
+  <link rel="stylesheet"
+        href="{% static 'inventory/vendor/leaflet.markercluster/MarkerCluster.Default.css' %}"
+        onerror="this.onerror=null;this.href='https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css';">
+
+  <script src="{% static 'inventory/vendor/leaflet.markercluster/leaflet.markercluster.js' %}"
+          onerror="this.onerror=null;this.src='https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js';"></script>
+
+  <style>
+    /* Jazzmin контейнерийн өргөн хязгаарлалтыг суллана */
+    .content-wrapper, .content, #content, .container-fluid, .container {
+      max-width: 100% !important;
+      width: 100% !important;
+    }
+
+    .locmap-wrap{ width: 100% !important; margin: 10px 0 14px 0; }
+    #locmap{
+      width: 100% !important;
+      height: calc(100vh - 330px);
+      min-height: 560px;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 3px solid #000;
+      background: #f7f7f7;
+      margin-bottom: 10px;
+    }
+
+    .locbar{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+      margin: 8px 0 10px 0;
+    }
+    .locbar select, .locbar input{
+      height: 36px;
+      padding: 6px 10px;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      background: #fff;
+      min-width: 170px;
+    }
+    .locbar button{
+      height: 36px;
+      padding: 0 14px;
+      border-radius: 6px;
+      border: 0;
+      background: #1677ff;
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .locbar .small{
+      font-size: 12px;
+      opacity: .85;
+      margin-left: 6px;
+    }
+
+    /* Admin table дээрх "Харах" товч */
+    a.button{
+      padding: 6px 10px;
+      border-radius: 6px;
+      background: #1677ff;
+      color: #fff !important;
+      font-weight: 700;
+      text-decoration: none !important;
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+
+  <div class="locmap-wrap">
+    <div id="locmap"></div>
+
+    <!-- ✅ Custom filter bar (URL params -> server-side filter) -->
+    <div class="locbar">
+      <select id="f_type"><option value="">Байршлын төрөл</option></select>
+      <select id="f_aimag"><option value="">Аймаг</option></select>
+      <select id="f_sum"><option value="">Сум/Дүүрэг</option></select>
+      <select id="f_org"><option value="">Хариуцагч</option></select>
+
+      <input id="f_q" type="text" placeholder="Хайх..." />
+      <button id="btn_apply" type="button">Хайлт</button>
+
+      <span class="small" id="loc_counts"></span>
+    </div>
+
+    <script id="locations-data" type="application/json">{{ locations_json|safe }}</script>
+  </div>
+
+  {{ block.super }}
+
+  <script>
+    (function(){
+      const $ = (id) => document.getElementById(id);
+
+      function getParam(name){
+        const u = new URL(window.location.href);
+        return u.searchParams.get(name) || "";
+      }
+      function setParam(name, val){
+        const u = new URL(window.location.href);
+        if (!val) u.searchParams.delete(name);
+        else u.searchParams.set(name, val);
+        u.searchParams.delete("p"); // paging reset
+        window.location.href = u.toString();
+      }
+
+      // ---- Parse JSON ----
+      let RAW = null;
+      try {
+        RAW = JSON.parse(($("locations-data").textContent || "[]"));
+        if (typeof RAW === "string") RAW = JSON.parse(RAW);
+      } catch (e) {
+        console.error("locations_json parse error:", e);
+        RAW = [];
+      }
+      const POINTS = Array.isArray(RAW) ? RAW : Object.values(RAW || {});
+      $("loc_counts").textContent = `Харагдахуй: ${POINTS.length}`;
+
+      if (!window.L) {
+        console.error("Leaflet not loaded.");
+        return;
+      }
+
+      // ---- Map init ----
+      const map = L.map("locmap", { zoomControl: true, scrollWheelZoom: true });
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 18,
+        attribution: "&copy; OpenStreetMap contributors"
+      }).addTo(map);
+
+      const TYPE_COLOR = {
+        "WEATHER":"#4b3bff","AWS":"#f2b233","HYDRO":"#1f8f3a","AEROLOGY":"#a000c8",
+        "AGRO":"#6a5a2a","ETALON":"#c0392b","RADAR":"#ff3b30","OTHER":"#7f8c8d"
+      };
+      function normType(t){
+        t = (t || "").toString().trim().toUpperCase();
+        return TYPE_COLOR[t] ? t : "OTHER";
+      }
+      function markerIcon(color){
+        return L.divIcon({
+          className: "",
+          html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid rgba(0,0,0,.35);box-shadow:0 2px 6px rgba(0,0,0,.25)"></div>`,
+          iconSize: [14,14],
+          iconAnchor: [7,7],
+          popupAnchor: [0,-8]
+        });
+      }
+
+      // ---- Cluster group ----
+      const hasCluster = !!(L.markerClusterGroup);
+      const cluster = hasCluster ? L.markerClusterGroup({ chunkedLoading: true }) : null;
+
+      // ---- Select option helpers ----
+      function uniqBy(arr, keyFn){
+        const m = new Map();
+        for (const x of arr){
+          const k = keyFn(x);
+          if (!k) continue;
+          if (!m.has(k)) m.set(k, x);
+        }
+        return Array.from(m.values());
+      }
+      function fillSelect(sel, items, placeholder){
+        sel.innerHTML = "";
+        const opt0 = document.createElement("option");
+        opt0.value = "";
+        opt0.textContent = placeholder;
+        sel.appendChild(opt0);
+        for (const it of items){
+          const o = document.createElement("option");
+          o.value = it.id;
+          o.textContent = it.name || "-";
+          sel.appendChild(o);
+        }
+      }
+
+      // Build type/aimag/org lists (ID-тай!)
+      const types = uniqBy(
+        POINTS.map(p => ({id:normType(p.type), name:normType(p.type)})),
+        x => x.id
+      ).sort((a,b)=>a.name.localeCompare(b.name));
+
+      const aimags = uniqBy(
+        POINTS.filter(p=>p.aimag_id).map(p => ({id:String(p.aimag_id), name:p.aimag||""})),
+        x => x.id
+      ).sort((a,b)=>a.name.localeCompare(b.name));
+
+      const orgs = uniqBy(
+        POINTS.filter(p=>p.org_id).map(p => ({id:String(p.org_id), name:p.org||""})),
+        x => x.id
+      ).sort((a,b)=>a.name.localeCompare(b.name));
+
+      fillSelect($("f_type"), types, "Байршлын төрөл");
+      fillSelect($("f_aimag"), aimags, "Аймаг");
+      fillSelect($("f_org"), orgs, "Хариуцагч");
+
+      function buildSumsForAimag(aimagId){
+        const sums = uniqBy(
+          POINTS.filter(p => String(p.aimag_id||"") === String(aimagId||"") && p.sum_id)
+                .map(p => ({id:String(p.sum_id), name:p.sum||""})),
+          x => x.id
+        ).sort((a,b)=>a.name.localeCompare(b.name));
+        fillSelect($("f_sum"), sums, "Сум/Дүүрэг");
+      }
+
+      // ---- Restore values from URL params (admin server-side filters) ----
+      $("f_type").value = getParam("location_type__exact");
+      $("f_aimag").value = getParam("aimag_ref__id__exact");
+      $("f_org").value = getParam("owner_org__id__exact");
+      $("f_q").value = getParam("q");
+
+      buildSumsForAimag($("f_aimag").value);
+      $("f_sum").value = getParam("sum_ref__id__exact");
+
+      $("f_aimag").addEventListener("change", () => {
+        buildSumsForAimag($("f_aimag").value);
+        $("f_sum").value = "";
+      });
+
+      // ✅ Apply -> server-side filter (table + map reload)
+      $("btn_apply").addEventListener("click", () => {
+        setParam("location_type__exact", $("f_type").value);
+        setParam("aimag_ref__id__exact", $("f_aimag").value);
+        setParam("sum_ref__id__exact", $("f_sum").value);
+        setParam("owner_org__id__exact", $("f_org").value);
+        setParam("q", ($("f_q").value || "").trim());
+      });
+
+      // ---- Marker click -> admin edit page ----
+      function adminChangeUrl(id){
+        return `/django-admin/inventory/location/${id}/change/`;
+      }
+
+      let markerLayers = [];
+
+      function renderMarkers(){
+        if (cluster) cluster.clearLayers();
+        markerLayers.forEach(m => { try { map.removeLayer(m); } catch(e){} });
+        markerLayers = [];
+
+        const selOrg = $("f_org").value;
+        const selType = $("f_type").value;
+        const selAimag = $("f_aimag").value;
+        const selSum = $("f_sum").value;
+
+        const visible = [];
+
+        for (const p of POINTS){
+          const lat = Number(p.lat), lon = Number(p.lon);
+          if (!isFinite(lat) || !isFinite(lon)) continue;
+
+          if (selOrg && String(p.org_id||"") !== String(selOrg)) continue;
+          if (selType && normType(p.type) !== selType) continue;
+          if (selAimag && String(p.aimag_id||"") !== String(selAimag)) continue;
+          if (selSum && String(p.sum_id||"") !== String(selSum)) continue;
+
+          const t = normType(p.type);
+          const m = L.marker([lat, lon], { icon: markerIcon(TYPE_COLOR[t]), title: p.name || "" });
+
+          m.on("click", () => { window.location.href = adminChangeUrl(p.id); });
+          m.bindTooltip(p.name || "-", { direction:"top", offset:[0,-8], opacity:0.9 });
+
+          visible.push(m);
+        }
+
+        if (cluster){
+          visible.forEach(m => cluster.addLayer(m));
+          cluster.addTo(map);
+        } else {
+          visible.forEach(m => { m.addTo(map); markerLayers.push(m); });
+        }
+
+        const group = visible.length ? L.featureGroup(visible) : null;
+        if (group){
+          map.fitBounds(group.getBounds().pad(0.10));
+        } else {
+          map.setView([47.9, 106.9], 5);
+        }
+
+        $("loc_counts").textContent = `Харагдахуй: ${visible.length} / ${POINTS.length} (локал шүүлтүүр)`;
+      }
+
+      ["f_org","f_type","f_aimag","f_sum"].forEach(id => {
+        $(id).addEventListener("change", () => renderMarkers());
+      });
+
+      renderMarkers();
+      setTimeout(() => { try { map.invalidateSize(); } catch(e){} }, 180);
+    })();
+  </script>
+{% endblock %}
