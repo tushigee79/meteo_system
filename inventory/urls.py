@@ -16,4 +16,7 @@ urlpatterns = [
 
     # CSV импорт
     path("import-csv/", views.device_import_csv, name="device_import_csv"),
+
+    # ✅ Dashboard
+    path("dashboard/", views.dashboard_cards, name="dashboard"),
 ]

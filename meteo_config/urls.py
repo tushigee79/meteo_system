@@ -1,9 +1,10 @@
 # meteo_config/urls.py
-from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from django.shortcuts import redirect
+
+from django.contrib import admin  # ← default admin ашиглана
 
 from inventory.admin_dashboard import (
     dashboard_table_view,
@@ -11,7 +12,6 @@ from inventory.admin_dashboard import (
     export_devices_csv,
 )
 
-# ✅ views-ийг функцээр нь импортлоно (views гэж namespace хэрэггүй)
 from inventory.views import (
     location_map,
     station_map_view,
@@ -20,6 +20,8 @@ from inventory.views import (
 
 from inventory.views_district_api import lookup_district_api
 from inventory.views_auth import force_password_change
+
+from inventory import views_admin_workflow as wf
 
 
 urlpatterns = [
@@ -35,6 +37,7 @@ urlpatterns = [
     path("admin/dashboard/graph/", dashboard_graph_view, name="dashboard_graph"),
     path("admin/dashboard/export/devices.csv/", export_devices_csv, name="export_devices_csv"),
     path("admin/dashboard/", lambda request: redirect("/admin/dashboard/graph/", permanent=False)),
+    path("django-admin/inventory/workflow/pending/", wf.workflow_pending_dashboard, name="workflow_pending_dashboard"),
 
     # =========================
     # 3) SHORTCUT REDIRECTS
@@ -47,7 +50,7 @@ urlpatterns = [
     path("admin/data-entry/", admin_data_entry, name="admin_data_entry"),
 
     # =========================
-    # 4) INVENTORY URLS (✅ эндээс API ажиллана)
+    # 4) INVENTORY URLS
     # =========================
     path("inventory/", include("inventory.urls")),
 
@@ -63,10 +66,27 @@ urlpatterns = [
     path("accounts/force-password-change/", force_password_change, name="inventory_force_password_change"),
 
     # =========================
-    # 7) DJANGO ADMIN (main)
+    # 7) WORKFLOW endpoints  ✅ (admin-аас өмнө)
     # =========================
-    path("django-admin/", admin.site.urls),
+    path(
+        "django-admin/inventory/workflow/pending-counts/",
+        wf.workflow_pending_counts,
+        name="workflow_pending_counts",
+    ),
+    path(
+        "django-admin/inventory/workflow/review/",
+        wf.workflow_review_action,
+        name="workflow_review_action",
+    ),
+    # хэрвээ dashboard view хэрэгтэй бол:
+    path("django-admin/inventory/workflow/pending/", wf.workflow_pending_dashboard, name="workflow_pending_dashboard"),
+
+    # =========================
+    # 8) DJANGO ADMIN (main)
+    # =========================
+    path("django-admin/", admin.site.urls),   # ← ЭНД inventory_admin_site БИШ
 ]
+
 
 # =========================
 # Static / Media (DEBUG үед)

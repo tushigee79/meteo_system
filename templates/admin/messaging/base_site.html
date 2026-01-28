@@ -1,0 +1,68 @@
+{% extends "admin/base.html" %}
+{% load static %}
+
+{# This override injects a small script to show a pending badge in the admin sidebar. #}
+
+{% block extrahead %}
+  {{ block.super }}
+  <script>
+  (function(){
+    const countsUrl = "{{ workflow_pending_counts_url|default:'' }}";
+    const pendingUrl = "{{ workflow_pending_url|default:'' }}";
+    if(!countsUrl || !pendingUrl) return;
+
+    function ensureMenuLink(){
+      // Try to find an existing link in the sidebar that points to pendingUrl
+      const links = Array.from(document.querySelectorAll('a'));
+      let a = links.find(x => (x.getAttribute("href") || "").includes(pendingUrl));
+      return a || null;
+    }
+
+    function upsertBadge(a, total){
+      if(!a) return;
+      let badge = a.querySelector(".wf-pending-badge");
+      if(!badge){
+        badge = document.createElement("span");
+        badge.className = "wf-pending-badge";
+        badge.style.marginLeft = "8px";
+        badge.style.display = "inline-flex";
+        badge.style.alignItems = "center";
+        badge.style.justifyContent = "center";
+        badge.style.minWidth = "18px";
+        badge.style.height = "18px";
+        badge.style.padding = "0 6px";
+        badge.style.borderRadius = "999px";
+        badge.style.fontSize = "12px";
+        badge.style.fontWeight = "800";
+        badge.style.background = "rgba(239,68,68,.14)";
+        badge.style.color = "#b91c1c";
+        a.appendChild(badge);
+      }
+      badge.textContent = String(total || 0);
+      badge.style.display = (Number(total||0) > 0) ? "inline-flex" : "none";
+    }
+
+    async function tick(){
+      try{
+        const res = await fetch(countsUrl, {credentials:"same-origin"});
+        if(!res.ok) return;
+        const data = await res.json();
+        const total = data.total || 0;
+
+        const a = ensureMenuLink();
+        if(a){
+          upsertBadge(a, total);
+        }else{
+          // If not found, we won't forcibly inject a new menu item (keeps it safe).
+          // You can add a permanent menu link via Jazzmin settings later.
+        }
+      }catch(e){}
+    }
+
+    document.addEventListener("DOMContentLoaded", ()=>{
+      tick();
+      setInterval(tick, 60000);
+    });
+  })();
+  </script>
+{% endblock %}
