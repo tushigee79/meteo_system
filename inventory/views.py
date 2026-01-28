@@ -8,9 +8,11 @@ from urllib.parse import urlencode
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.db.models import Count, Q, Max
+from django.utils import timezone
 from django.http import HttpResponse, JsonResponse
 from django.urls import reverse
 from django.views.decorators.http import require_GET
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.core.serializers.json import DjangoJSONEncoder
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib import admin as dj_admin
@@ -87,6 +89,7 @@ def _get_user_scope(request):
 
 
 @staff_member_required
+@xframe_options_sameorigin
 def station_map_view(request):
     """Нэг байршлыг газрын зураг дээр харуулах (?id=...)"""
     loc_id = request.GET.get("id")
@@ -413,7 +416,72 @@ def api_catalog_items(request):
 
     name_field = "name_mn" if hasattr(InstrumentCatalog, "name_mn") else "name"
     items = [{"id": c.id, "name": getattr(c, name_field, str(c))} for c in qs]
-    return JsonResponse({"ok": True, "items": items})
+    return JsonRespons
+
+@staff_member_required
+def dashboard_cards(request):
+    """
+    Admin dashboard summary cards.
+    Scope:
+      - superuser: all
+      - non-superuser: only own aimag (UserProfile.aimag)
+    """
+
+    # --- scope ---
+    user = request.user
+    aimag_id = None
+    if not user.is_superuser:
+        prof = getattr(user, "profile", None) or getattr(user, "userprofile", None)
+        aimag_id = getattr(prof, "aimag_id", None)
+
+    loc_qs = Location.objects.all()
+    dev_qs = Device.objects.select_related("location")
+    if aimag_id:
+        loc_qs = loc_qs.filter(aimag_ref_id=aimag_id)
+        dev_qs = dev_qs.filter(location__aimag_ref_id=aimag_id)
+
+    total_locations = loc_qs.count()
+    total_devices = dev_qs.count()
+
+    # --- Location status counts ---
+    # EMPTY: no devices
+    empty_locations = loc_qs.filter(devices__isnull=True).distinct().count()
+
+    # BROKEN: any device in Broken/Repair
+    broken_locations = loc_qs.filter(devices__status__in=["Broken", "Repair"]).distinct().count()
+
+    ok_locations = max(total_locations - empty_locations - broken_locations, 0)
+
+    # --- Pending workflow counts (MS + CA) ---
+    pending_ms = MaintenanceService.objects.filter(workflow_status="SUBMITTED")
+    pending_ca = ControlAdjustment.objects.filter(workflow_status="SUBMITTED")
+
+    if aimag_id:
+        pending_ms = pending_ms.filter(device__location__aimag_ref_id=aimag_id)
+        pending_ca = pending_ca.filter(device__location__aimag_ref_id=aimag_id)
+
+    pending_total_items = pending_ms.count() + pending_ca.count()
+
+    # pending stations (distinct locations with any submitted MS/CA)
+    pending_location_ids = set(
+        pending_ms.values_list("device__location_id", flat=True)
+    ) | set(
+        pending_ca.values_list("device__location_id", flat=True)
+    )
+    pending_locations = len([x for x in pending_location_ids if x])
+
+    ctx = {
+        "title": "Dashboard",
+        "total_locations": total_locations,
+        "total_devices": total_devices,
+        "pending_total_items": pending_total_items,
+        "pending_locations": pending_locations,
+        "broken_locations": broken_locations,
+        "empty_locations": empty_locations,
+        "ok_locations": ok_locations,
+        "aimag_id": aimag_id,
+    }
+    return render(request, "admin/inventory/reports/dashboard_cards.html", ctx)
 
 
 @staff_member_required
