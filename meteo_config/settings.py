@@ -93,7 +93,7 @@ JAZZMIN_SETTINGS = {
     "show_sidebar": True,
     "navigation_expanded": True,
     "base_url": "/django-admin/",
-    "custom_js": "js/admin_sidebar_link.js",
+    "custom_js": None,
     "use_google_fonts": True,
 
     "icons": {
@@ -104,6 +104,7 @@ JAZZMIN_SETTINGS = {
     },
 
     # Sidebar
+    # ✅ Давхардлыг арилгахын тулд auth (users/groups)-ийг custom_links-оос авч хаясан.
     "custom_links": {
         "inventory": [
             {
@@ -136,19 +137,17 @@ JAZZMIN_SETTINGS = {
                 "icon": "fas fa-map-marked-alt",
                 "permissions": ["inventory.view_location"],
             },
-        ],
-        "auth": [
             {
-                "name": "Хэрэглэгчид",
-                "url": "/django-admin/auth/user/",
-                "icon": "fas fa-user",
-                "permissions": ["auth.view_user"],
+                "name": "Pending Workflow",
+                "url": "/django-admin/inventory/workflow/pending/",
+                "icon": "fas fa-tasks",
+                "permissions": ["inventory.view_maintenanceservice", "inventory.view_controladjustment"],
             },
             {
-                "name": "Бүлгүүд",
-                "url": "/django-admin/auth/group/",
-                "icon": "fas fa-users",
-                "permissions": ["auth.view_group"],
+                "name": "Workflow Audit",
+                "url": "/django-admin/inventory/workflow/audit/",
+                "icon": "fas fa-clipboard-list",
+                "permissions": ["inventory.view_workflowauditlog"],
             },
         ],
     },
