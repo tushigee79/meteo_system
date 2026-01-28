@@ -1,10 +1,93 @@
-{% extends "admin/base_site.html" %}
+<!-- ✅ BASE_SITE_OVERRIDE_LOADED -->
+<script>console.log("✅ BASE_SITE OVERRIDE LOADED");</script>
+
+{% extends "admin/base.html" %}
 {% load static %}
 
 {% block extrahead %}
-  {{ block.super }}
-  <script>
-    // Device add/change page cascade endpoints base (admin registered under /django-admin/)
-    window.__DEVICE_LOCATION_FILTER_API_BASE__ = "/django-admin/inventory/device/";
-  </script>
+{{ block.super }}
+<script>
+(function(){
+
+  const countsUrl = "/django-admin/inventory/workflow/pending-counts/";
+  const pendingUrl = "/django-admin/inventory/workflow/pending/";
+
+  function findSidebar(){
+    return document.querySelector(".sidebar, #nav-sidebar, aside");
+  }
+
+  function createMenuItem(){
+    const sidebar = findSidebar();
+    if(!sidebar) return null;
+
+    if(sidebar.querySelector('[data-pending-workflow="1"]')) {
+      return sidebar.querySelector('[data-pending-workflow="1"]');
+    }
+
+    const li = document.createElement("li");
+    li.setAttribute("data-pending-workflow", "1");
+    li.style.listStyle = "none";
+
+    const a = document.createElement("a");
+    a.href = pendingUrl;
+    a.style.display = "flex";
+    a.style.alignItems = "center";
+    a.style.justifyContent = "space-between";
+    a.style.padding = "8px 12px";
+    a.style.margin = "4px 8px";
+    a.style.borderRadius = "8px";
+    a.style.textDecoration = "none";
+    a.style.fontWeight = "600";
+    a.style.background = "rgba(255,255,255,0.08)";
+    a.style.color = "#fff";
+
+    const label = document.createElement("span");
+    label.innerHTML = "⏳ Pending Workflow";
+
+    const badge = document.createElement("span");
+    badge.className = "pending-badge";
+    badge.style.display = "none";
+    badge.style.minWidth = "18px";
+    badge.style.height = "18px";
+    badge.style.padding = "0 6px";
+    badge.style.borderRadius = "999px";
+    badge.style.fontSize = "12px";
+    badge.style.fontWeight = "700";
+    badge.style.background = "#ef4444";
+    badge.style.color = "#fff";
+    badge.style.textAlign = "center";
+
+    a.appendChild(label);
+    a.appendChild(badge);
+    li.appendChild(a);
+
+    sidebar.appendChild(li);
+    return li;
+  }
+
+  async function updateBadge(){
+    try{
+      const res = await fetch(countsUrl, {credentials:"same-origin"});
+      if(!res.ok) return;
+      const data = await res.json();
+      const total = data.total || 0;
+
+      const item = createMenuItem();
+      if(!item) return;
+
+      const badge = item.querySelector(".pending-badge");
+      badge.textContent = total;
+
+      badge.style.display = total > 0 ? "inline-block" : "none";
+
+    }catch(e){}
+  }
+
+  document.addEventListener("DOMContentLoaded", ()=>{
+    updateBadge();
+    setInterval(updateBadge, 60000);
+  });
+
+})();
+</script>
 {% endblock %}

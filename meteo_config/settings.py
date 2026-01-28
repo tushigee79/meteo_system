@@ -159,3 +159,7 @@ JAZZMIN_SETTINGS = {
         {"name": "Газрын зураг", "url": "inventory_map", "permissions": ["inventory.view_location"]},
     ],
 }
+
+# Allow embedding internal pages (e.g., maps) in Django admin iframes
+X_FRAME_OPTIONS = "SAMEORIGIN"
+
