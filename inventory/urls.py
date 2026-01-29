@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from .views_dashboard_graph import dashboard_graph  # ✅ new
 
 app_name = "inventory"
 
@@ -19,4 +20,5 @@ urlpatterns = [
 
     # ✅ Dashboard
     path("dashboard/", views.dashboard_cards, name="dashboard"),
+    path("dashboard/graph/", dashboard_graph, name="dashboard_graph"),  # ✅ new
 ]

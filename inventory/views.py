@@ -238,3 +238,71 @@ def dashboard_cards(request):
         return JsonResponse({"ok": True, **ctx})
 
     return render(request, "admin/inventory/reports/dashboard_cards.html", ctx)
+
+
+# ============================================================
+# ✅ Compatibility endpoints (restores URLs used in urls.py)
+#   Added without modifying existing logic.
+# ============================================================
+from django.views.decorators.http import require_GET
+from django.http import HttpResponse
+from django.contrib.admin.views.decorators import staff_member_required
+
+def _try_import(path: str, name: str):
+    try:
+        mod = __import__(path, fromlist=[name])
+        return getattr(mod, name, None)
+    except Exception:
+        return None
+
+@require_GET
+def api_sum_duureg(request):
+    """Dependent dropdown API. Delegates to inventory.views_api.api_sum_duureg if present."""
+    fn = _try_import('inventory.views_api', 'api_sum_duureg')
+    if callable(fn):
+        return fn(request)
+    # Safe fallback
+    try:
+        from .models import SumDuureg
+    except Exception:
+        return JsonResponse({'ok': True, 'results': []})
+    aimag_id = (request.GET.get('aimag_id') or '').strip()
+    q = (request.GET.get('q') or '').strip()
+    qs = SumDuureg.objects.all()
+    if aimag_id.isdigit():
+        qs = qs.filter(aimag_id=int(aimag_id))
+    else:
+        return JsonResponse({'ok': True, 'results': []})
+    if q:
+        qs = qs.filter(name__icontains=q)
+    return JsonResponse({'ok': True, 'results': [{'id': s.id, 'name': s.name} for s in qs.order_by('name')[:500]]})
+
+@require_GET
+def api_catalog_items(request):
+    """InstrumentCatalog API. Delegates to inventory.views_api.api_catalog_items if present."""
+    fn = _try_import('inventory.views_api', 'api_catalog_items')
+    if callable(fn):
+        return fn(request)
+    try:
+        from .models import InstrumentCatalog
+    except Exception:
+        return JsonResponse({'ok': True, 'results': []})
+    kind = (request.GET.get('kind') or '').strip().upper()
+    q = (request.GET.get('q') or '').strip()
+    qs = InstrumentCatalog.objects.all()
+    if hasattr(InstrumentCatalog, 'is_active'):
+        qs = qs.filter(is_active=True)
+    if kind:
+        qs = qs.filter(kind=kind)
+    if q:
+        qs = qs.filter(name_mn__icontains=q) | qs.filter(code__icontains=q)
+    out = [{'id': c.id, 'code': getattr(c,'code',''), 'name': getattr(c,'name_mn','') or str(c), 'kind': getattr(c,'kind','')} for c in qs.order_by('id')[:500]]
+    return JsonResponse({'ok': True, 'results': out})
+
+@staff_member_required
+def device_import_csv(request):
+    """CSV import view. Delegates to inventory.views_import.device_import_csv if present."""
+    fn = _try_import('inventory.views_import', 'device_import_csv')
+    if callable(fn):
+        return fn(request)
+    return HttpResponse('device_import_csv not implemented in this branch.', status=501)
