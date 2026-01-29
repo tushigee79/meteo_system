@@ -1,0 +1,438 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}Dashboard Graph{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static 'inventory/vendor/leaflet/leaflet.css' %}">
+<script src="{% static 'inventory/vendor/leaflet/leaflet.js' %}"></script>
+<script src="{% static 'inventory/vendor/echarts/echarts.min.js' %}"></script>
+
+<style>
+/* Pulse for Leaflet SVG paths */
+.leaflet-interactive.pending-pulse {
+  animation: pulseStroke 1.2s ease-in-out infinite;
+}
+@keyframes pulseStroke {
+  0%   { stroke-width: 2; opacity: 1; }
+  50%  { stroke-width: 6; opacity: .65; }
+  100% { stroke-width: 2; opacity: 1; }
+}
+
+.map-legend{
+  background:#fff;
+  border:1px solid rgba(0,0,0,.12);
+  border-radius:12px;
+  padding:10px 12px;
+  font-size:12px;
+  line-height:1.35;
+  box-shadow: 0 8px 20px rgba(0,0,0,.08);
+}
+.map-legend label{ cursor:pointer; user-select:none; }
+.legend-dot{
+  display:inline-block;
+  width:10px;height:10px;
+  border-radius:999px;
+  margin-right:6px;
+  vertical-align:middle;
+  border:1px solid rgba(0,0,0,.15);
+}
+.legend-row{ margin:2px 0; }
+
+.dg-filters{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  align-items:center;
+  margin-bottom:12px;
+}
+.dg-filters input[type="date"], .dg-filters select{
+  padding:6px 8px;
+  border:1px solid rgba(0,0,0,.2);
+  border-radius:8px;
+}
+.dg-btn{
+  padding:6px 10px;
+  border-radius:10px;
+  border:1px solid rgba(0,0,0,.18);
+  background:#fff;
+  cursor:pointer;
+}
+.dg-btn[disabled]{ opacity:.55; cursor:not-allowed; }
+
+.dg-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+  align-items:stretch;
+}
+.dg-card{
+  border:1px solid rgba(0,0,0,.12);
+  border-radius:12px;
+  padding:10px;
+  background:#fff;
+}
+.dg-title{
+  font-weight:900;
+  margin:0 0 8px 0;
+  font-size:14px;
+}
+.dg-hint{
+  font-size:12px;
+  opacity:.75;
+  margin-top:6px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Dashboard – Workflow Analytics</h1>
+
+<form id="filterForm" class="dg-filters" method="get">
+  <input type="date" name="date_from" value="{{ filter_date_from }}">
+  <input type="date" name="date_to" value="{{ filter_date_to }}">
+
+  <select name="axis">
+    <option value="day" {% if filter_axis == "day" %}selected{% endif %}>Өдөр</option>
+    <option value="week" {% if filter_axis == "week" %}selected{% endif %}>7 хоног</option>
+    <option value="month" {% if filter_axis == "month" %}selected{% endif %}>Сар</option>
+  </select>
+
+  <select name="status">
+    <option value="">Workflow status (all)</option>
+    {% for v,l in status_choices %}
+      <option value="{{ v }}" {% if filter_status == v %}selected{% endif %}>{{ l }}</option>
+    {% endfor %}
+  </select>
+
+  <select name="kind">
+    <option value="">Device kind (all)</option>
+    {% for v,l in kind_choices %}
+      <option value="{{ v }}" {% if filter_kind == v %}selected{% endif %}>{{ l }}</option>
+    {% endfor %}
+  </select>
+
+  <select name="location_type">
+    <option value="">Location type (all)</option>
+    {% for v,l in location_type_choices %}
+      <option value="{{ v }}" {% if filter_location_type == v %}selected{% endif %}>{{ l }}</option>
+    {% endfor %}
+  </select>
+
+  <button class="dg-btn" type="submit">Apply</button>
+  <button class="dg-btn" type="button" id="btnReset">Reset</button>
+
+  <span id="ajaxState" class="dg-hint" style="margin-left:auto;"></span>
+</form>
+
+<div class="dg-grid">
+  <div class="dg-card">
+    <div class="dg-title">Workflow Stacked (Pending / Approved / Rejected)</div>
+    <div id="chart_stacked" style="height:300px;"></div>
+    <div class="dg-hint">Click bar segment → sets workflow status filter (AJAX).</div>
+  </div>
+
+  <div class="dg-card">
+    <div class="dg-title">Workflow SLA Trend (avg hours: submitted → approved)</div>
+    <div id="chart_sla" style="height:300px;"></div>
+    <div class="dg-hint">Approved records only. Uses submitted_at → approved_at.</div>
+  </div>
+
+  <div class="dg-card">
+    <div class="dg-title">Breakdown by Aimag (top 20)</div>
+    <div id="chart_aimag" style="height:300px;"></div>
+  </div>
+
+  <div class="dg-card">
+    <div class="dg-title">Breakdown by Device Kind</div>
+    <div id="chart_kind" style="height:300px;"></div>
+  </div>
+
+  <div class="dg-card" style="grid-column:1 / span 2;">
+    <div class="dg-title">Map (Pending pulse + Legend toggles)</div>
+    <div id="map" style="height:420px;border-radius:12px;"></div>
+  </div>
+</div>
+
+<script>
+/**
+ * SAFE JSON defaults
+ */
+let wfStacked = {{ echarts_workflow_json|default:"{\"axis\":[],\"pending\":[],\"approved\":[],\"rejected\":[]}"|safe }};
+let aimagSeries = {{ echarts_aimag_json|default:"[]"|safe }};
+let kindSeries = {{ echarts_kind_json|default:"[]"|safe }};
+let slaSeries = {{ echarts_sla_json|default:"{\"axis\":[],\"sla_hours\":[]}"|safe }};
+let points = {{ locations_json|default:"[]"|safe }};
+
+const TYPE_COLORS = {
+  AWS:"#2563eb",
+  WEATHER:"#16a34a",
+  HYDRO:"#0891b2",
+  RADAR:"#9333ea",
+  AEROLOGY:"#db2777",
+  AGRO:"#65a30d",
+  ETALON:"#f97316",
+  OTHER:"#6b7280"
+};
+const STATUS_COLORS = {
+  PENDING:"#f59e0b",
+  BROKEN:"#ef4444",
+  EMPTY:"#9ca3af",
+  OK:"#22c55e"
+};
+
+// ---------------- utils ----------------
+function serializeForm(form){
+  const fd = new FormData(form);
+  const obj = {};
+  for (const [k,v] of fd.entries()){
+    if (v !== "") obj[k] = v;
+  }
+  return obj;
+}
+function buildUrlWith(paramsObj){
+  const url = new URL(window.location.href);
+  Object.keys(paramsObj).forEach(k => {
+    const v = paramsObj[k];
+    if (v === null || v === undefined || v === "") url.searchParams.delete(k);
+    else url.searchParams.set(k, v);
+  });
+  return url.toString();
+}
+function setAjaxState(msg){
+  const el = document.getElementById("ajaxState");
+  if (el) el.textContent = msg || "";
+}
+async function ajaxReload(paramsObj){
+  const url = new URL(window.location.href);
+  Object.keys(paramsObj || {}).forEach(k => {
+    const v = paramsObj[k];
+    if (v === null || v === undefined || v === "") url.searchParams.delete(k);
+    else url.searchParams.set(k, v);
+  });
+  url.searchParams.set("ajax","1");
+
+  setAjaxState("Loading…");
+  try{
+    const res = await fetch(url.toString(), {
+      headers: {"X-Requested-With":"XMLHttpRequest","Accept":"application/json"},
+      credentials: "same-origin"
+    });
+    if (!res.ok) throw new Error("HTTP "+res.status);
+    const data = await res.json();
+
+    wfStacked = data.echarts_workflow_stacked || wfStacked;
+    aimagSeries = data.echarts_aimag || aimagSeries;
+    kindSeries = data.echarts_kind || kindSeries;
+    slaSeries = data.echarts_sla || slaSeries;
+    points = data.locations || points;
+
+    renderAll();
+    window.history.replaceState({}, "", buildUrlWith(paramsObj || {}));
+    setAjaxState("Updated");
+    setTimeout(()=>setAjaxState(""), 900);
+  }catch(e){
+    console.warn("AJAX failed, fallback to full reload", e);
+    window.location.href = buildUrlWith(paramsObj || {});
+  }
+}
+
+// ---------------- charts ----------------
+const chartStacked = echarts.init(document.getElementById("chart_stacked"));
+const chartSla = echarts.init(document.getElementById("chart_sla"));
+const chartAimag = echarts.init(document.getElementById("chart_aimag"));
+const chartKind = echarts.init(document.getElementById("chart_kind"));
+
+function renderStacked(){
+  chartStacked.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { data: ["Pending","Approved","Rejected"] },
+    xAxis: { type:'category', data: wfStacked.axis || [], axisLabel:{ rotate: 18 } },
+    yAxis: { type:'value' },
+    series: [
+      { name:"Pending", type:'bar', stack:'total', data: wfStacked.pending || [] },
+      { name:"Approved", type:'bar', stack:'total', data: wfStacked.approved || [] },
+      { name:"Rejected", type:'bar', stack:'total', data: wfStacked.rejected || [] },
+    ]
+  }, true);
+}
+
+function renderSla(){
+  chartSla.setOption({
+    tooltip: { trigger:'axis' },
+    xAxis: { type:'category', data: slaSeries.axis || [], axisLabel:{ rotate: 18 } },
+    yAxis: { type:'value', name:'hours' },
+    series: [{ name:'SLA (hours)', type:'line', smooth:true, data: slaSeries.sla_hours || [] }]
+  }, true);
+}
+
+function renderBreakdowns(){
+  chartAimag.setOption({
+    tooltip:{},
+    xAxis:{ type:'category', data: (aimagSeries||[]).map(x=>x.name), axisLabel:{ rotate: 18 } },
+    yAxis:{ type:'value' },
+    series:[{ type:'bar', data:(aimagSeries||[]).map(x=>x.value) }]
+  }, true);
+
+  chartKind.setOption({
+    tooltip:{},
+    xAxis:{ type:'category', data: (kindSeries||[]).map(x=>x.name), axisLabel:{ rotate: 18 } },
+    yAxis:{ type:'value' },
+    series:[{ type:'bar', data:(kindSeries||[]).map(x=>x.value) }]
+  }, true);
+}
+
+// Click stacked bar segment -> set workflow status filter
+chartStacked.on('click', function(params){
+  const form = document.getElementById("filterForm");
+  const base = serializeForm(form);
+  const seriesName = params.seriesName; // Pending/Approved/Rejected
+  if (seriesName === "Pending") base.status = "SUBMITTED";
+  if (seriesName === "Approved") base.status = "APPROVED";
+  if (seriesName === "Rejected") base.status = "REJECTED";
+  ajaxReload(base);
+});
+
+// ---------------- map + legend ----------------
+const map = L.map('map').setView([47.9, 106.9], 5);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+
+const markers = []; // {p,m}
+const typeSet = {};
+(points||[]).forEach(p => typeSet[p.type || "OTHER"] = true);
+const state = {
+  types: {...typeSet},
+  statuses: { PENDING:true, BROKEN:true, EMPTY:true, OK:true }
+};
+
+function markerBucket(p){
+  const pt = Number(p.pending_total || 0);
+  if (pt > 0) return "PENDING";
+  if ((p.status||"").toUpperCase() === "BROKEN") return "BROKEN";
+  if ((p.status||"").toUpperCase() === "EMPTY") return "EMPTY";
+  return "OK";
+}
+function shouldShow(p){
+  const t = p.type || "OTHER";
+  if (!state.types[t]) return false;
+  const b = markerBucket(p);
+  if (!state.statuses[b]) return false;
+  return true;
+}
+function buildMarker(p){
+  const t = p.type || "OTHER";
+  const c = TYPE_COLORS[t] || TYPE_COLORS.OTHER;
+  const isPending = Number(p.pending_total || 0) > 0;
+
+  const m = L.circleMarker([p.lat, p.lon], {
+    radius: 7,
+    weight: isPending ? 3 : 2,
+    color: "rgba(0,0,0,.35)",
+    fillColor: c,
+    fillOpacity: 0.95,
+    className: isPending ? "pending-pulse" : ""
+  });
+
+  m.bindPopup(`<b>${p.name||""}</b><br>Type: ${t}<br>Status: ${p.status||""}<br>Pending: ${p.pending_total||0}`);
+  return m;
+}
+function rebuildMarkers(){
+  markers.forEach(x => { try{ map.removeLayer(x.m); }catch(e){} });
+  markers.length = 0;
+
+  (points||[]).forEach(p => {
+    if (!p || p.lat === undefined || p.lon === undefined) return;
+    const m = buildMarker(p);
+    if (shouldShow(p)) m.addTo(map);
+    markers.push({p,m});
+  });
+}
+function refreshMarkers(){
+  markers.forEach(x => {
+    if (shouldShow(x.p)) x.m.addTo(map);
+    else map.removeLayer(x.m);
+  });
+}
+
+const legend = L.control({position:'topright'});
+legend.onAdd = function(){
+  const div = L.DomUtil.create('div','map-legend');
+  div.innerHTML = `
+    <div style="font-weight:900;margin-bottom:6px;">Legend</div>
+
+    <div style="font-weight:800;margin-bottom:6px;">Statuses</div>
+    <div style="margin-bottom:8px;">
+      <div class="legend-row"><label><input type="checkbox" data-st="PENDING" checked>
+        <span class="legend-dot" style="background:${STATUS_COLORS.PENDING};"></span> Pending</label></div>
+      <div class="legend-row"><label><input type="checkbox" data-st="BROKEN" checked>
+        <span class="legend-dot" style="background:${STATUS_COLORS.BROKEN};"></span> Broken</label></div>
+      <div class="legend-row"><label><input type="checkbox" data-st="EMPTY" checked>
+        <span class="legend-dot" style="background:${STATUS_COLORS.EMPTY};"></span> Empty</label></div>
+      <div class="legend-row"><label><input type="checkbox" data-st="OK" checked>
+        <span class="legend-dot" style="background:${STATUS_COLORS.OK};"></span> OK</label></div>
+    </div>
+
+    <div style="font-weight:800;margin-bottom:6px;">Types</div>
+    <div id="typeBox"></div>
+  `;
+  return div;
+};
+legend.addTo(map);
+
+function setupLegend(){
+  const typeBox = document.getElementById("typeBox");
+  typeBox.innerHTML = "";
+  Object.keys(typeSet).sort().forEach(t => {
+    const color = TYPE_COLORS[t] || TYPE_COLORS.OTHER;
+    const row = document.createElement("div");
+    row.className = "legend-row";
+    row.innerHTML = `<label><input type="checkbox" data-type="${t}" checked>
+      <span class="legend-dot" style="background:${color};"></span> ${t}</label>`;
+    typeBox.appendChild(row);
+  });
+
+  document.querySelectorAll(".map-legend input").forEach(inp => {
+    L.DomEvent.disableClickPropagation(inp);
+    inp.addEventListener("change", (e) => {
+      const el = e.target;
+      const st = el.getAttribute("data-st");
+      const ty = el.getAttribute("data-type");
+      if (st) state.statuses[st] = el.checked;
+      if (ty) state.types[ty] = el.checked;
+      refreshMarkers();
+    });
+  });
+}
+
+// ---------------- form handlers ----------------
+document.getElementById("filterForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  ajaxReload(serializeForm(e.target));
+});
+document.getElementById("btnReset").addEventListener("click", () => ajaxReload({}));
+
+function renderAll(){
+  renderStacked();
+  renderSla();
+  renderBreakdowns();
+
+  // rebuild legend/typeSet when ajax updates points
+  Object.keys(typeSet).forEach(k => delete typeSet[k]);
+  (points||[]).forEach(p => typeSet[p.type || "OTHER"] = true);
+  Object.keys(state.types).forEach(k => delete state.types[k]);
+  Object.keys(typeSet).forEach(k => state.types[k] = true);
+
+  rebuildMarkers();
+  setupLegend();
+}
+
+renderAll();
+window.addEventListener("resize", () => {
+  chartStacked.resize();
+  chartSla.resize();
+  chartAimag.resize();
+  chartKind.resize();
+});
+</script>
+{% endblock %}

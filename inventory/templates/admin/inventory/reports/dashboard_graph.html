@@ -7,7 +7,7 @@
 {{ block.super }}
 <link rel="stylesheet" href="{% static 'inventory/vendor/leaflet/leaflet.css' %}">
 <script src="{% static 'inventory/vendor/leaflet/leaflet.js' %}"></script>
-<script src="{% static 'inventory/vendor/echarts/echarts.min.js' %}"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 
 <style>
 /* Pulse for Leaflet SVG paths */
@@ -136,7 +136,7 @@
 
   <div class="dg-card" style="grid-column:1 / span 2;">
     <div class="dg-title">Map (Pending pulse + Legend toggles + Reverse filter)</div>
-    <div id="map" style="height:420px;border-radius:12px;"></div>
+    <div id="map" style="height:420px;border-radius:12px;" style="height:420px;"></div>
     <div class="dg-hint">
       Click marker → filter charts by that marker's type/status locally (Alt+click clears local selection).
       Use legend to toggle markers; charts auto-recompute from visible markers.
