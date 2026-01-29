@@ -348,6 +348,13 @@ class MaintenanceService(models.Model):
     )
     reject_reason = models.TextField(blank=True, default="", verbose_name="Reject шалтгаан")
 
+    # --- Hybrid verification flags ---
+    self_verified = models.BooleanField(default=False, verbose_name="Аймаг өөрөө баталсан")
+    central_verified = models.BooleanField(default=False, verbose_name="Төвөөр баталгаажсан")
+    central_review_required = models.BooleanField(default=False, verbose_name="Төвийн баталгаа шаардлагатай")
+
+
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -468,6 +475,13 @@ class ControlAdjustment(models.Model):
         verbose_name="Татгалзсан хэрэглэгч",
     )
     reject_reason = models.TextField(blank=True, default="", verbose_name="Reject шалтгаан")
+
+    # --- Hybrid verification flags ---
+    self_verified = models.BooleanField(default=False, verbose_name="Аймаг өөрөө баталсан")
+    central_verified = models.BooleanField(default=False, verbose_name="Төвөөр баталгаажсан")
+    central_review_required = models.BooleanField(default=False, verbose_name="Төвийн баталгаа шаардлагатай")
+
+
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -654,3 +668,87 @@ class AuditEvent(models.Model):
 
     def __str__(self):
         return f"{self.created_at:%Y-%m-%d %H:%M:%S} {self.action} {self.model_label}#{self.object_id}"
+
+
+# ============================================================
+# 11) Workflow Review Audit Log (Approve/Reject)
+# ============================================================
+class WorkflowAuditLog(models.Model):
+    ACTION_CHOICES = [
+        ("APPROVE", "APPROVE"),
+        ("REJECT", "REJECT"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="workflow_audit_logs",
+        verbose_name="Хэрэглэгч",
+    )
+    action = models.CharField(max_length=10, choices=ACTION_CHOICES, verbose_name="Үйлдэл")
+    model_name = models.CharField(max_length=120, verbose_name="Model нэр")  # e.g. "MaintenanceService"
+    record_id = models.PositiveIntegerField(verbose_name="Record ID")
+    comment = models.TextField(blank=True, default="", verbose_name="Тайлбар")
+    created_at = models.DateTimeField(default=timezone.now, verbose_name="Огноо")
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        verbose_name = "Workflow audit log"
+        verbose_name_plural = "Workflow audit logs"
+        indexes = [
+            models.Index(fields=["model_name", "record_id"]),
+            models.Index(fields=["action"]),
+            models.Index(fields=["created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.created_at:%Y-%m-%d %H:%M:%S} {self.action} {self.model_name}#{self.record_id}"
+
+# ============================================================
+# 12) Workflow materialized daily aggregation (optional, for heavy data)
+# ============================================================
+class WorkflowDailyAgg(models.Model):
+    """Daily materialized aggregation for workflow analytics.
+
+    ⚠️ Optional: use with management command materialize_workflow_agg.
+    Create migration after adding this model.
+    """
+
+    day = models.DateField(db_index=True, verbose_name="Огноо (өдөр)")
+    # Scope dimensions (nullable so it can store global totals)
+    aimag = models.ForeignKey(Aimag, null=True, blank=True, on_delete=models.SET_NULL, related_name="workflow_daily_aggs")
+    kind = models.CharField(max_length=20, blank=True, default="", verbose_name="Device kind")
+    location_type = models.CharField(max_length=20, blank=True, default="", verbose_name="Location type")
+
+    # Counts (MS/CA by status)
+    ms_submitted = models.PositiveIntegerField(default=0)
+    ms_approved = models.PositiveIntegerField(default=0)
+    ms_rejected = models.PositiveIntegerField(default=0)
+
+    ca_submitted = models.PositiveIntegerField(default=0)
+    ca_approved = models.PositiveIntegerField(default=0)
+    ca_rejected = models.PositiveIntegerField(default=0)
+
+    # SLA (approved only) - average hours from submitted_at to approved_at
+    sla_avg_hours = models.FloatField(default=0.0)
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Workflow daily aggregation"
+        verbose_name_plural = "Workflow daily aggregations"
+        indexes = [
+            models.Index(fields=["day"]),
+            models.Index(fields=["day", "aimag"]),
+            models.Index(fields=["day", "kind"]),
+            models.Index(fields=["day", "location_type"]),
+        ]
+        unique_together = ("day", "aimag", "kind", "location_type")
+
+    def __str__(self):
+        a = self.aimag.name if self.aimag else "ALL"
+        k = self.kind or "ALL"
+        lt = self.location_type or "ALL"
+        return f"{self.day} {a} {k} {lt}"
