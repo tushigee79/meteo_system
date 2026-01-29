@@ -4,7 +4,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.shortcuts import redirect
 
-from django.contrib import admin  # ← default admin ашиглана
+from django.contrib import admin  # default admin
 
 from inventory.admin_dashboard import (
     dashboard_table_view,
@@ -37,7 +37,6 @@ urlpatterns = [
     path("admin/dashboard/graph/", dashboard_graph_view, name="dashboard_graph"),
     path("admin/dashboard/export/devices.csv/", export_devices_csv, name="export_devices_csv"),
     path("admin/dashboard/", lambda request: redirect("/admin/dashboard/graph/", permanent=False)),
-    path("django-admin/inventory/workflow/pending/", wf.workflow_pending_dashboard, name="workflow_pending_dashboard"),
 
     # =========================
     # 3) SHORTCUT REDIRECTS
@@ -68,23 +67,15 @@ urlpatterns = [
     # =========================
     # 7) WORKFLOW endpoints  ✅ (admin-аас өмнө)
     # =========================
-    path(
-        "django-admin/inventory/workflow/pending-counts/",
-        wf.workflow_pending_counts,
-        name="workflow_pending_counts",
-    ),
-    path(
-        "django-admin/inventory/workflow/review/",
-        wf.workflow_review_action,
-        name="workflow_review_action",
-    ),
-    # хэрвээ dashboard view хэрэгтэй бол:
+    path("django-admin/inventory/workflow/pending-counts/", wf.workflow_pending_counts, name="workflow_pending_counts"),
+    path("django-admin/inventory/workflow/review/", wf.workflow_review_action, name="workflow_review_action"),
     path("django-admin/inventory/workflow/pending/", wf.workflow_pending_dashboard, name="workflow_pending_dashboard"),
+    path("django-admin/inventory/workflow/audit/", wf.workflow_audit_log, name="workflow_audit_log"),
 
     # =========================
     # 8) DJANGO ADMIN (main)
     # =========================
-    path("django-admin/", admin.site.urls),   # ← ЭНД inventory_admin_site БИШ
+    path("django-admin/", admin.site.urls),
 ]
 
 
