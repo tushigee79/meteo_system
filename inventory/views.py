@@ -1,11 +1,16 @@
 import json
+import logging
+from django.core.cache import cache
 from django.contrib.admin.views.decorators import staff_member_required
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db.models import Count
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpRequest, FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.clickjacking import xframe_options_sameorigin
+from django.utils import timezone
+
+from .device_passport_pdf import generate_device_passport_pdf
 
 from .models import (
     Location,
@@ -16,6 +21,26 @@ from .models import (
 
 ADMIN_NS = "admin"
 
+logger = logging.getLogger(__name__)
+
+
+
+
+def get_ub_aimag_id():
+    """Return Ulaanbaatar Aimag ID without hardcoding. Cached for 1 day."""
+    key = "inventory:ub_aimag_id:v1"
+    v = cache.get(key)
+    if v is not None:
+        return v or None
+    try:
+        from .models import Aimag
+        ub = Aimag.objects.get(name__icontains="улаанбаатар")
+        cache.set(key, int(ub.id), 86400)
+        return int(ub.id)
+    except Exception:
+        logger.warning("UB aimag not found by name__icontains='улаанбаатар'.")
+        cache.set(key, 0, 3600)
+        return None
 
 # ---------------------------
 # Scope helpers
@@ -46,14 +71,110 @@ def _scope_locations(request):
         return qs.none()
     qs = qs.filter(aimag_ref_id=scope["aimag_id"])
     # UB (aimag_id==1) үед district/sum scope байвал
-    if scope["aimag_id"] == 1 and scope["sum_id"] and hasattr(Location, "sum_ref_id"):
+    ub_id = get_ub_aimag_id()
+    if ub_id is not None and scope["aimag_id"] == ub_id and scope["sum_id"] and hasattr(Location, "sum_ref_id"):
         qs = qs.filter(sum_ref_id=scope["sum_id"])
     return qs
 
 
 def _scope_devices(request):
     loc_ids = _scope_locations(request).values_list("id", flat=True)
-    return Device.objects.filter(location_id__in=list(loc_ids))
+    return Device.objects.filter(location_id__in=loc_ids).select_related("location", "location__aimag_ref", "location__sum_ref", "catalog_item")
+
+
+
+@staff_member_required
+def qr_device_lookup(request: HttpRequest, token):
+    """
+    QR token-оор багажийг олж admin change page руу оруулна.
+    ✅ Admin login шаардана (staff_member_required).
+    ✅ AimagEngineer зэрэг role scope-г _scope_devices() ашиглан мөрдөнө.
+    """
+    # _scope_devices нь хэрэглэгчийн эрхээр (aimag гэх мэт) төхөөрөмжийг шүүнэ
+    qs = _scope_devices(request)
+    device = get_object_or_404(qs, qr_token=token)
+    return redirect(f"/django-admin/inventory/device/{device.pk}/change/")
+
+
+def _is_qr_active(device: Device) -> bool:
+    if getattr(device, "qr_revoked_at", None):
+        return False
+    exp = getattr(device, "qr_expires_at", None)
+    if exp and exp <= timezone.now():
+        return False
+    return True
+
+
+def _device_timeline(device: Device):
+    """Unified lifecycle timeline: movements + maintenance + adjustments."""
+    items = []
+
+    # Movements
+    for mv in getattr(device, "movements", None).all().order_by("-moved_at")[:50]:
+        items.append({
+            "date": mv.moved_at,
+            "kind": "MOVEMENT",
+            "title": "Шилжилт",
+            "details": f"{mv.source_location} → {mv.destination_location}",
+        })
+
+    # Maintenance / repair
+    for ms in MaintenanceService.objects.filter(device=device).order_by("-date")[:50]:
+        items.append({
+            "date": ms.date,
+            "kind": "MAINTENANCE",
+            "title": "Засвар үйлчилгээ",
+            "details": f"{ms.maintenance_type} — {ms.result_status}",
+        })
+
+    # Control / calibration adjustment
+    for ca in ControlAdjustment.objects.filter(device=device).order_by("-date")[:50]:
+        items.append({
+            "date": ca.date,
+            "kind": "ADJUSTMENT",
+            "title": "Калибровка/шалгалт",
+            "details": f"{ca.control_type} — {ca.result_status}",
+        })
+
+    # Sort newest first; handle None dates
+    items.sort(key=lambda x: x["date"] or timezone.now(), reverse=True)
+    return items
+
+
+def qr_device_public_view(request: HttpRequest, token):
+    """Public read-only QR page (no login)."""
+    device = get_object_or_404(Device.objects.select_related("location"), qr_token=token)
+    if not _is_qr_active(device):
+        raise Http404("QR token expired or revoked.")
+
+    timeline = _device_timeline(device)[:100]
+
+    # Map link (google) if coordinates exist
+    lat = _get_float(getattr(device, "location", None), "latitude", "lat")
+    lon = _get_float(getattr(device, "location", None), "longitude", "lon")
+    gmap = None
+    if lat is not None and lon is not None:
+        gmap = f"https://www.google.com/maps?q={lat},{lon}"
+
+    return render(
+        request,
+        "inventory/qr_device_public.html",
+        {
+            "device": device,
+            "timeline": timeline,
+            "google_map_url": gmap,
+        },
+    )
+
+
+def qr_device_public_passport_pdf(request: HttpRequest, token):
+    """Public PDF download (readonly) via QR token."""
+    device = get_object_or_404(Device.objects.select_related("location"), qr_token=token)
+    if not _is_qr_active(device):
+        raise Http404("QR token expired or revoked.")
+    pdf_bytes = generate_device_passport_pdf(device, request=request)
+    filename = f"device_passport_{device.serial_number or device.pk}.pdf"
+    return FileResponse(pdf_bytes, as_attachment=True, filename=filename, content_type="application/pdf")
 
 
 def _get_float(obj, *names):

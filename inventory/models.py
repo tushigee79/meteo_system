@@ -1,9 +1,15 @@
 # inventory/models.py
 from django.db import models
-from django.contrib.auth.models import User
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 from django.conf import settings
+from datetime import timedelta
+
+from django.contrib.auth.models import User   # ✅ ЗААВАЛ
+
+import uuid
+from io import BytesIO
+from django.core.files.base import ContentFile
 
 from inventory.geo.district_lookup import lookup_ub_district
 
@@ -196,6 +202,24 @@ class Device(models.Model):
 
     serial_number = models.CharField(max_length=100, unique=True, verbose_name="Серийн дугаар")
 
+    # QR token (used for QR lookup/public page)
+    qr_token = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        db_index=True,
+        verbose_name="QR токен",
+    )
+
+    # QR security / lifecycle
+    qr_expires_at = models.DateTimeField(null=True, blank=True, db_index=True, verbose_name="QR хүчинтэй хугацаа")
+    qr_revoked_at = models.DateTimeField(null=True, blank=True, db_index=True, verbose_name="QR хүчингүй болгосон огноо")
+
+
+
+    # QR image (generated automatically on save if missing)
+    qr_image = models.ImageField(upload_to="qr/devices/", null=True, blank=True, verbose_name="QR зураг")
+
     kind = models.CharField(
         max_length=20,
         choices=Kind.choices,
@@ -228,9 +252,13 @@ class Device(models.Model):
     lifespan_years = models.PositiveIntegerField(default=10, verbose_name="Ашиглалтын хугацаа (жил)")
 
     def clean(self):
-        if self.catalog_item and self.catalog_item.kind != self.kind:
-            raise ValidationError({"catalog_item": "Каталогийн төрөл таарахгүй байна."})
+        super().clean()
 
+        # catalog kind must match device kind
+        if self.catalog_item and self.catalog_item.kind != self.kind:
+            raise ValidationError({"catalog_item": "Каталогийн төрөл таарахгүй"})
+
+        # OTHER requires other_name
         if self.kind == self.Kind.OTHER and not (self.other_name or "").strip():
             raise ValidationError({"other_name": "“Бусад” сонгосон бол нэр заавал бөглөнө."})
 
@@ -238,10 +266,124 @@ class Device(models.Model):
         name = self.catalog_item.name_mn if self.catalog_item else (self.other_name or "-")
         return f"{self.serial_number} - {name}"
 
+    def save(self, *args, **kwargs):
+        """Save + (1) auto QR generation, (2) movement history when location changes."""
+        # track old location for movement history
+        old_location_id = None
+
+        # default QR expiry: 12 months (≈365 days) from creation
+        if not self.qr_expires_at:
+            self.qr_expires_at = timezone.now() + timedelta(days=365)
+
+        if self.pk:
+            try:
+                old_location_id = Device.objects.filter(pk=self.pk).values_list("location_id", flat=True).first()
+            except Exception:
+                old_location_id = None
+
+        super().save(*args, **kwargs)
+
+        # Write movement history if location changed
+        try:
+            new_location_id = self.location_id
+            if self.pk and old_location_id != new_location_id:
+                DeviceMovement.objects.create(
+                    device=self,
+                    from_location_id=old_location_id,
+                    to_location_id=new_location_id,
+                    moved_at=timezone.now(),
+                    reason="",
+                    moved_by=None,
+                )
+        except Exception:
+            pass
+
+        # Generate QR if missing
+        if not self.qr_image:
+            try:
+                import os
+                import qrcode
+                from io import BytesIO
+                from django.core.files.base import ContentFile
+
+                # ensure target folder exists (MEDIA_ROOT/qr/devices)
+                target_dir = os.path.join(str(settings.MEDIA_ROOT), "qr", "devices")
+                os.makedirs(target_dir, exist_ok=True)
+
+                serial = (self.serial_number or "").strip()
+                # QR data: public URL (absolute if SITE_BASE_URL is set)
+                base = (getattr(settings, "SITE_BASE_URL", "") or "").rstrip("/")
+                path = f"/qr/public/{self.qr_token}/"
+                qr_data = (base + path) if base else path
+
+                img = qrcode.make(qr_data)
+                buf = BytesIO()
+                img.save(buf, format="PNG")
+
+                serial_part = (serial or "no_serial").strip() or "no_serial"
+                fname = f"device_{self.pk}_{serial_part}.png".replace(" ", "_")
+                self.qr_image.save(fname, ContentFile(buf.getvalue()), save=False)
+                super().save(update_fields=["qr_image"])
+            except Exception as e:
+                print("❌ QR generation failed:", repr(e))
+
     class Meta:
         verbose_name = "Хэмжих хэрэгсэл"
         verbose_name_plural = "Хэмжих хэрэгсэл"
 
+# ============================================================
+# ✅ Device Movement History (WMO metadata)
+# ============================================================
+class DeviceMovement(models.Model):
+    """Багаж шилжилт хөдөлгөөний түүх.
+
+    device.location өөрчлөгдөх бүрт from/to байршил, огноо, шалтгаан, шилжүүлсэн этгээдийг хадгална.
+    """
+
+    device = models.ForeignKey(
+        "inventory.Device",
+        on_delete=models.CASCADE,
+        related_name="movements",
+        verbose_name="Багаж",
+    )
+    from_location = models.ForeignKey(
+        "inventory.Location",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="moved_from",
+        verbose_name="Хаанаас",
+    )
+    to_location = models.ForeignKey(
+        "inventory.Location",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="moved_to",
+        verbose_name="Хаашаа",
+    )
+    moved_at = models.DateTimeField(default=timezone.now, verbose_name="Шилжүүлсэн огноо/цаг")
+    reason = models.CharField(max_length=255, blank=True, default="", verbose_name="Шалтгаан")
+    moved_by = models.ForeignKey(
+        "inventory.UserProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="device_movements",
+        verbose_name="Шилжүүлсэн (UserProfile)",
+    )
+
+    class Meta:
+        verbose_name = "Багаж шилжилт (түүх)"
+        verbose_name_plural = "Багаж шилжилтийн түүх"
+        ordering = ["-moved_at", "-id"]
+        indexes = [
+            models.Index(fields=["moved_at"]),
+            models.Index(fields=["device", "moved_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.device_id} {self.from_location_id}->{self.to_location_id} @ {self.moved_at:%Y-%m-%d %H:%M}"
 
 # ============================================================
 # ✅ WorkflowStatus helper (shared)

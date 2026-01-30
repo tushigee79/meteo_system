@@ -1,14 +1,20 @@
+# AUTO-GENERATED admin.py (final) - 2026-01-30T05:07:59
 from __future__ import annotations
 
 from typing import Any, Dict
 import json
+import logging
 
 from django.contrib import admin
+from django import forms
+from django.core.cache import cache
 from django.db.models import Count, Q, QuerySet
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import render
 from django.urls import path, reverse
 from django.utils.html import format_html
+
+from .pdf_passport import generate_device_passport_pdf_bytes
 
 from .models import (
     Aimag,
@@ -17,6 +23,7 @@ from .models import (
     Location,
     InstrumentCatalog,
     Device,
+    DeviceMovement,
     MaintenanceService,
     ControlAdjustment,
     MaintenanceEvidence,
@@ -35,6 +42,25 @@ except Exception:
 
 
 
+logger = logging.getLogger(__name__)
+
+def get_ub_aimag_id() -> int | None:
+    """Return Ulaanbaatar Aimag ID without hardcoding.
+    Cached for 1 day. Returns None if not found."""
+    key = "inventory:ub_aimag_id:v1"
+    v = cache.get(key)
+    if v is not None:
+        return v or None
+    try:
+        ub = Aimag.objects.get(name__icontains="улаанбаатар")
+        cache.set(key, int(ub.id), 86400)
+        return int(ub.id)
+    except Exception:
+        logger.warning("UB aimag not found by name__icontains='улаанбаатар'. Falling back to None.")
+        cache.set(key, 0, 3600)
+        return None
+
+
 # ============================================================
 # Admin list filters (enterprise)
 # ============================================================
@@ -51,7 +77,8 @@ class SumDuuregByAimagFilter(admin.SimpleListFilter):
         qs = SumDuureg.objects.filter(aimag_id=aimag_id).order_by("name")
         # If model has is_ub_district and aimag is UB, show only districts; else show non-district sums.
         try:
-            is_ub = Aimag.objects.filter(id=aimag_id, is_ub=True).exists()
+            ub_id = get_ub_aimag_id()
+            is_ub = (ub_id is not None and str(ub_id) == str(aimag_id))
             if hasattr(SumDuureg, "is_ub_district"):
                 qs = qs.filter(is_ub_district=True) if is_ub else qs.filter(is_ub_district=False)
         except Exception:
@@ -125,7 +152,8 @@ def _scope_qs(request: HttpRequest, qs: QuerySet, *, aimag_field: str) -> QueryS
     qs = qs.filter(**{f"{aimag_field}_id": aimag_id})
 
     sum_id = scope.get("sum_id")
-    if aimag_id == 1 and sum_id:
+    ub_id = get_ub_aimag_id()
+    if ub_id is not None and aimag_id == ub_id and sum_id:
         if aimag_field.endswith("aimag_ref") and hasattr(qs.model, "sum_ref_id"):
             qs = qs.filter(sum_ref_id=sum_id)
         elif "location__" in aimag_field:
@@ -141,12 +169,48 @@ def _scope_location_qs(request: HttpRequest) -> QuerySet[Location]:
     if not scope["aimag_id"]:
         return qs.none()
     qs = qs.filter(aimag_ref_id=scope["aimag_id"])
-    if scope["aimag_id"] == 1 and scope["sum_id"]:
+    ub_id = get_ub_aimag_id()
+    if ub_id is not None and scope["aimag_id"] == ub_id and scope["sum_id"]:
         qs = qs.filter(sum_ref_id=scope["sum_id"])
     return qs
 
 
+# ==========================================================
 # ============================================================
+# Device Passport PDF (A4) action
+# ============================================================
+from django.http import HttpResponse
+import io, zipfile
+
+@admin.action(description="Device Passport PDF (A4) татах")
+def download_device_passport(modeladmin, request: HttpRequest, queryset: QuerySet):
+    """Admin action: download passport PDF for selected devices.
+    - If 1 device selected: return PDF
+    - If multiple: return ZIP of PDFs
+    """
+    devices = list(queryset)
+    if not devices:
+        return None
+
+    if len(devices) == 1:
+        d = devices[0]
+        pdf_bytes = generate_device_passport_pdf_bytes(d)
+        resp = HttpResponse(pdf_bytes, content_type="application/pdf")
+        resp["Content-Disposition"] = f'attachment; filename="device_passport_{d.pk}.pdf"'
+        return resp
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for d in devices:
+            try:
+                pdf_bytes = generate_device_passport_pdf_bytes(d)
+                zf.writestr(f"device_passport_{d.pk}.pdf", pdf_bytes)
+            except Exception:
+                continue
+    resp = HttpResponse(buf.getvalue(), content_type="application/zip")
+    resp["Content-Disposition"] = 'attachment; filename="device_passports.zip"'
+    return resp
+
 # Inlines
 # ============================================================
 
@@ -199,6 +263,51 @@ class ControlHistoryInline(admin.TabularInline):
     )
     fields = readonly_fields
 
+
+
+
+class DeviceMovementInline(admin.TabularInline):
+    model = DeviceMovement
+    extra = 0
+    can_delete = False
+    show_change_link = False
+    readonly_fields = ("moved_at", "from_location", "to_location", "reason", "moved_by")
+    fields = readonly_fields
+    ordering = ("-moved_at", "-id")
+
+
+
+
+@admin.register(DeviceMovement)
+class DeviceMovementAdmin(admin.ModelAdmin):
+    """Тусдаа admin menu: DeviceMovement түүх."""
+
+    date_hierarchy = "moved_at"
+    list_display = ("moved_at", "device", "device_kind", "from_location", "to_location", "aimag_col", "reason", "moved_by")
+    list_select_related = ("device", "from_location", "to_location", "to_location__aimag_ref")
+    list_filter = (
+        ("moved_at", admin.DateFieldListFilter),
+        "device__kind",
+        "to_location__aimag_ref",
+    )
+    search_fields = ("device__serial_number", "reason")
+    ordering = ("-moved_at", "-id")
+    autocomplete_fields = ("device", "from_location", "to_location", "moved_by")
+    
+    @admin.display(description="Төрөл")
+    def device_kind(self, obj: DeviceMovement):
+        try:
+            return obj.device.kind
+        except Exception:
+            return ""
+
+    @admin.display(description="Аймаг")
+    def aimag_col(self, obj: DeviceMovement):
+        try:
+            loc = obj.to_location or obj.from_location
+            return getattr(getattr(loc, "aimag_ref", None), "name", "") if loc else ""
+        except Exception:
+            return ""
 
 class SparePartItemInline(admin.TabularInline):
     model = SparePartItem
@@ -464,24 +573,58 @@ class LocationAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
 # ============================================================
 # Device
 # ============================================================
+
+
+class DeviceAdminForm(forms.ModelForm):
+    """Admin form нэмэлт талбар: location өөрчлөх үед movement reason хадгална."""
+
+    movement_reason = forms.CharField(
+        label="Шилжилтийн шалтгаан",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Ж: Эвдэрсэн тул нөөц станц руу шилжүүлэв"}),
+        help_text="Зөвхөн байршил өөрчлөгдөх үед DeviceMovement түүхэнд хадгалагдана.",
+    )
+
+    class Meta:
+        model = Device
+        fields = "__all__"
+
 @admin.register(Device)
 class DeviceAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
+    form = DeviceAdminForm
 
+    actions = [download_device_passport]
     aimag_path = 'location__aimag_ref'
     sum_path = 'location__sum_ref'
     kind_path = 'kind'
 
-    list_display = ("serial_number", "kind", "location", "status")
+    list_display = ("serial_number", "kind", "location", "status", "qr_col")
     list_filter = ("kind", "status")
-    search_fields = ("serial_number", "inventory_code", "location__name")
+    search_fields = ("serial_number", "other_name", "location__name")
     ordering = ("-id",)
-    inlines = [MaintenanceHistoryInline, ControlHistoryInline]
+    readonly_fields = ("qr_preview",)
+    inlines = [MaintenanceHistoryInline, ControlHistoryInline, DeviceMovementInline]
 
     class Media:
         js = (
             "inventory/js/admin/device_kind_filter.js",
             "inventory/js/admin/device_location_filter_enterprise.js",
         )
+
+
+    @admin.display(description="QR")
+    def qr_col(self, obj: Device):
+        if getattr(obj, "qr_image", None):
+            return format_html('<img src="{}" style="height:42px;width:42px;object-fit:contain;border:1px solid #ddd;border-radius:4px;" />', obj.qr_image.url)
+        return "-"
+
+    @admin.display(description="QR зураг")
+    def qr_preview(self, obj: Device):
+        if not obj.pk:
+            return "—"
+        if getattr(obj, "qr_image", None):
+            return format_html('<img src="{}" style="max-height:260px;max-width:260px;border:1px solid #ddd;border-radius:8px;" />', obj.qr_image.url)
+        return "—"
 
     def get_urls(self):
         urls = super().get_urls()
@@ -518,9 +661,43 @@ class DeviceAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def get_queryset(self, request: HttpRequest) -> QuerySet:
-        qs = super().get_queryset(request).select_related("location")
+        qs = super().get_queryset(request).select_related("location", "location__aimag_ref", "location__sum_ref", "catalog_item")
         return _scope_qs(request, qs, aimag_field="location__aimag_ref")
 
+    def save_model(self, request: HttpRequest, obj: Device, form, change: bool) -> None:
+        """Auto-write DeviceMovement when location changes (WMO metadata)."""
+        old_loc_id = None
+        if change and obj.pk:
+            try:
+                old_loc_id = Device.objects.filter(pk=obj.pk).values_list("location_id", flat=True).first()
+            except Exception:
+                old_loc_id = None
+
+        super().save_model(request, obj, form, change)
+
+        try:
+            new_loc_id = obj.location_id
+            if change and old_loc_id != new_loc_id:
+                prof = getattr(request.user, "profile", None) or getattr(request.user, "userprofile", None)
+                moved_by = getattr(prof, "pk", None)
+                reason = ""
+                try:
+                    reason = (form.cleaned_data.get("movement_reason") or "").strip()
+                except Exception:
+                    reason = ""
+                DeviceMovement.objects.create(
+                    device=obj,
+                    from_location_id=old_loc_id,
+                    to_location_id=new_loc_id,
+                    moved_by_id=moved_by,
+                    reason=reason,
+                )
+        except Exception:
+            # Never break admin save if movement logging fails
+            logger.exception("DeviceMovement auto-log failed for device_id=%s", obj.pk)
+
+
+    
     def has_delete_permission(self, request, obj=None):
         return request.user.is_superuser
 
@@ -546,7 +723,7 @@ class MaintenanceServiceAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
         js = ("inventory/js/admin/performer_toggle.js",)
 
     def get_queryset(self, request: HttpRequest) -> QuerySet:
-        qs = super().get_queryset(request).select_related("device", "device__location")
+        qs = super().get_queryset(request).select_related("device", "device__location", "device__location__aimag_ref", "device__location__sum_ref")
         return _scope_qs(request, qs, aimag_field="device__location__aimag_ref")
 
     def has_delete_permission(self, request, obj=None):
@@ -570,7 +747,7 @@ class ControlAdjustmentAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
         js = ("inventory/js/admin/performer_toggle.js",)
 
     def get_queryset(self, request: HttpRequest) -> QuerySet:
-        qs = super().get_queryset(request).select_related("device", "device__location")
+        qs = super().get_queryset(request).select_related("device", "device__location", "device__location__aimag_ref", "device__location__sum_ref")
         return _scope_qs(request, qs, aimag_field="device__location__aimag_ref")
 
     def has_delete_permission(self, request, obj=None):
