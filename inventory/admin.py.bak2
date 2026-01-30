@@ -1,0 +1,238 @@
+from __future__ import annotations
+
+from datetime import date, timedelta
+
+from django import forms
+from django.contrib import admin, messages
+from django.contrib.admin import SimpleListFilter
+from django.db.models import Count
+from django.shortcuts import redirect, render
+
+from .models import (
+    Aimag,
+    Soum,
+    Location,
+    Device,
+    DeploymentHistory,
+    CalibrationLog,
+    MaintenanceLog,
+)
+
+
+class ExcelImportForm(forms.Form):
+    """Excel болон CSV файл оруулах форм."""
+    excel_file = forms.FileField(label="Файл сонгох (.xlsx, .csv)")
+
+
+class ValidUntilFilter(SimpleListFilter):
+    """Device.valid_until хугацаагаар шүүх (expired / 30 / 60 / 90)."""
+    title = "Дуусах хугацаа"
+    parameter_name = "valid_until_bucket"
+
+    def lookups(self, request, model_admin):
+        return (
+            ("expired", "Хугацаа дууссан"),
+            ("30", "30 хоногт дуусна"),
+            ("60", "60 хоногт дуусна"),
+            ("90", "90 хоногт дуусна"),
+        )
+
+    def queryset(self, request, queryset):
+        v = self.value()
+        if not v:
+            return queryset
+
+        today = date.today()
+        if v == "expired":
+            return queryset.filter(valid_until__lt=today)
+        if v in {"30", "60", "90"}:
+            days = int(v)
+            return queryset.filter(valid_until__gte=today, valid_until__lte=today + timedelta(days=days))
+        return queryset
+
+
+class DeploymentInline(admin.TabularInline):
+    model = DeploymentHistory
+    extra = 0
+    fields = (
+        "location",
+        "installed_at",
+        "removed_at",
+        "installed_by",
+        "removed_by",
+        "reason",
+        "location_desc",
+        "height_m",
+    )
+    ordering = ("-installed_at",)
+    autocomplete_fields = ("location",)
+
+
+class CalibrationInline(admin.TabularInline):
+    model = CalibrationLog
+    extra = 0
+    fields = (
+        "calibrated_on",
+        "valid_until",
+        "result",
+        "certificate_no",
+        "method",
+        "standard_ref",
+        "performed_by",
+        "remarks",
+    )
+    ordering = ("-calibrated_on",)
+
+
+class MaintenanceInline(admin.TabularInline):
+    model = MaintenanceLog
+    extra = 0
+    fields = (
+        "event_at",
+        "kind",
+        "outcome",
+        "description",
+        "parts_used",
+        "performed_by",
+        "cost_mnt",
+    )
+    ordering = ("-event_at",)
+
+
+@admin.register(Aimag)
+class AimagAdmin(admin.ModelAdmin):
+    search_fields = ("name",)
+
+
+@admin.register(Soum)
+class SoumAdmin(admin.ModelAdmin):
+    list_display = ("name", "aimag")
+    list_filter = ("aimag",)
+    search_fields = ("name", "aimag__name")
+
+
+@admin.register(Location)
+class LocationAdmin(admin.ModelAdmin):
+    list_display = ("location_type", "aimag", "soum", "name", "latitude", "longitude", "device_count")
+    list_filter = ("location_type", "aimag", "soum", "is_active")
+    search_fields = ("name", "wmo_id", "wsi", "aimag__name", "soum__name")
+    autocomplete_fields = ("aimag", "soum")
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.annotate(_device_count=Count("devices", distinct=True))
+
+    @admin.display(description="Багажны тоо", ordering="_device_count")
+    def device_count(self, obj: Location) -> int:
+        return getattr(obj, "_device_count", 0)
+
+
+@admin.register(Device)
+class DeviceAdmin(admin.ModelAdmin):
+    list_display = (
+        "category",
+        "device_type",
+        "name",
+        "serial_number",
+        "current_location",
+        "installed_date",
+        "last_verified",
+        "valid_until",
+        "valid_status",
+        "cert_number",
+    )
+    list_filter = ("category", "device_type", ValidUntilFilter)
+    search_fields = ("name", "serial_number", "cert_number", "location_name", "location__name")
+    date_hierarchy = "valid_until"
+    autocomplete_fields = ("location",)
+    inlines = (DeploymentInline, CalibrationInline, MaintenanceInline)
+
+    def get_urls(self):
+        from django.urls import path
+        urls = super().get_urls()
+        custom = [
+            path("import-excel/", self.admin_site.admin_view(self.import_excel), name="device_import_excel"),
+        ]
+        return custom + urls
+
+    @admin.display(description="Байршил")
+    def current_location(self, obj: Device) -> str:
+        if getattr(obj, "location_id", None):
+            return str(obj.location)
+        return obj.location_name
+
+    @admin.display(description="Төлөв")
+    def valid_status(self, obj: Device) -> str:
+        today = date.today()
+        if obj.valid_until < today:
+            return "❌ Дууссан"
+        if obj.valid_until <= today + timedelta(days=30):
+            return "⚠️ 30 хоногт"
+        if obj.valid_until <= today + timedelta(days=60):
+            return "⏳ 60 хоногт"
+        return "✅ OK"
+
+    def import_excel(self, request):
+        """
+        Simple import (optional):
+        - Accepts .xlsx or .csv
+        - Expected columns (example):
+          'Сери дугаар', 'Багажны нэр', 'Дуусах огноо', 'Гэрчилгээ', 'Байршил' (optional)
+        """
+        if request.method == "POST":
+            form = ExcelImportForm(request.POST, request.FILES)
+            if form.is_valid():
+                f = form.cleaned_data["excel_file"]
+
+                try:
+                    import pandas as pd
+                except Exception:
+                    messages.error(request, "pandas суусан эсэхийг шалга (pip install pandas openpyxl).")
+                    return redirect("..")
+
+                try:
+                    if f.name.lower().endswith(".csv"):
+                        try:
+                            df = pd.read_csv(f, encoding="utf-8")
+                        except Exception:
+                            df = pd.read_csv(f, encoding="cp1251")
+                    else:
+                        df = pd.read_excel(f)
+
+                    required = {"Сери дугаар", "Багажны нэр", "Дуусах огноо", "Гэрчилгээ"}
+                    missing = required - set(df.columns)
+                    if missing:
+                        messages.error(request, f"Шаардлагатай багана дутуу байна: {', '.join(sorted(missing))}")
+                        return redirect("..")
+
+                    count = 0
+                    for _, row in df.iterrows():
+                        serial = str(row["Сери дугаар"]).strip()
+                        if not serial:
+                            continue
+
+                        defaults = {
+                            "name": str(row["Багажны нэр"]).strip(),
+                            "valid_until": row["Дуусах огноо"],
+                            "cert_number": str(row["Гэрчилгээ"]).strip(),
+                        }
+
+                        if "Байршил" in df.columns:
+                            loc_name = str(row["Байршил"]).strip()
+                            if loc_name:
+                                defaults["location_name"] = loc_name
+
+                        Device.objects.update_or_create(
+                            serial_number=serial,
+                            defaults=defaults,
+                        )
+                        count += 1
+
+                    messages.success(request, f"Нийт {count} багажийг амжилттай импортлов.")
+                except Exception as e:
+                    messages.error(request, f"Алдаа: {e}")
+
+            return redirect("..")
+
+        form = ExcelImportForm()
+        return render(request, "admin/excel_form.html", {"form": form, "title": "Багаж импортлох"})
