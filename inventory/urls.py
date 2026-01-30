@@ -1,10 +1,22 @@
 from django.urls import path
 from . import views
 from .views_dashboard_graph import dashboard_graph  # ✅ new
+from inventory.views import qr_device_lookup
 
 app_name = "inventory"
 
 urlpatterns = [
+    # =========================
+    # QR lookup (TOP priority)
+    # =========================
+    path(
+        "qr/device/<uuid:token>/",
+        qr_device_lookup,
+        name="qr_device_lookup",
+    ),
+
+    # --- бусад URL-ууд ---
+
     # API (dependent dropdown)
     path("api/sum-duureg/", views.api_sum_duureg, name="api_sum_duureg"),
     path("api/catalog/", views.api_catalog_items, name="api_catalog_items"),
