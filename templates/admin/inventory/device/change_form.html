@@ -1,0 +1,14 @@
+{# inventory/templates/admin/inventory/device/change_form.html #}
+{% extends "admin/change_form.html" %}
+{% load i18n admin_urls %}
+
+{% block object-tools-items %}
+  {{ block.super }}
+  {% if original and original.pk %}
+    <li>
+      <a class="historylink" href="{% url opts|admin_urlname:'passport' original.pk %}">
+        Device Passport PDF
+      </a>
+    </li>
+  {% endif %}
+{% endblock %}

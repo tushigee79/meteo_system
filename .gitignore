@@ -59,3 +59,12 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+*.bak
+*.bak2
+*.rej
+*.patch
+*.gitpatch
+*_snippet.py
+views_*_snippet.txt
+

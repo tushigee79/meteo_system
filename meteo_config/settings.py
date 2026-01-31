@@ -2,33 +2,34 @@ import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-SECRET_KEY = 'django-insecure-your-secret-key'
+
+SECRET_KEY = "django-insecure-your-secret-key"
 DEBUG = True
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ["*"]
 
 INSTALLED_APPS = [
-    'jazzmin',
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-    'inventory.apps.InventoryConfig',
+    "jazzmin",
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "inventory.apps.InventoryConfig",
 ]
 
 MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'inventory.middleware.ForcePasswordChangeMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "inventory.middleware.ForcePasswordChangeMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-ROOT_URLCONF = 'meteo_config.urls'
+ROOT_URLCONF = "meteo_config.urls"
 
 TEMPLATES = [
     {
@@ -46,6 +47,8 @@ TEMPLATES = [
     },
 ]
 
+WSGI_APPLICATION = "meteo_config.wsgi.application"
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
@@ -53,16 +56,19 @@ DATABASES = {
     }
 }
 
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-LANGUAGE_CODE = 'mn'
-TIME_ZONE = 'Asia/Ulaanbaatar'
+LANGUAGE_CODE = "mn"
+TIME_ZONE = "Asia/Ulaanbaatar"
 USE_I18N = True
 USE_TZ = True
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 10}},
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 10},
+    },
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
@@ -81,30 +87,45 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 # =========================================================
-# JAZZMIN (FINAL – нэг л блок, dict бүтэцтэй)
+# JAZZMIN
 # =========================================================
 JAZZMIN_SETTINGS = {
-    "site_title": "NAMEM Багаж Хяналт",
-    "site_header": "NAMEM",
-    "site_brand": "Ус, Цаг Уурын Систем",
-    "copyright": "NAMEM 2026",
+    "site_title": "БҮРТГЭЛ",
+    "site_header": "Ус, Цаг Уурын Систем",
+    "site_brand": "БҮРТГЭЛ",
+    "welcome_sign": "БҮРТГЭЛ админ удирдлага",
+    "copyright": "ЦУОШГ",
 
-    "search_model": ["inventory.Device"],
+    # UI
     "show_sidebar": True,
     "navigation_expanded": True,
-    "base_url": "/django-admin/",
-    "custom_js": None,
-    "use_google_fonts": True,
+    "hide_apps": [],
+    "hide_models": [],
 
+    # Theme
+    "theme": "cosmo",
+
+    # Language labels (Монгол)
     "icons": {
         "auth": "fas fa-users-cog",
-        "inventory.Location": "fas fa-map-marker-alt",
-        "inventory.Device": "fas fa-tools",
-        "inventory.SparePartOrder": "fas fa-shopping-cart",
+        "auth.user": "fas fa-user",
+        "auth.group": "fas fa-users",
+
+        "inventory.device": "fas fa-microchip",
+        "inventory.location": "fas fa-map-marker-alt",
+        "inventory.organization": "fas fa-building",
+        "inventory.instrumentcatalog": "fas fa-list",
+        "inventory.maintenanceservice": "fas fa-tools",
+        "inventory.controladjustment": "fas fa-sliders-h",
+        "inventory.devicemovement": "fas fa-exchange-alt",
+
+        "inventory.sparepartorder": "fas fa-shopping-cart",
+        "inventory.authauditlog": "fas fa-user-shield",
     },
 
-    # Sidebar
-    # ✅ Давхардлыг арилгахын тулд auth (users/groups)-ийг custom_links-оос авч хаясан.
+    # =========================
+    # Sidebar links (Inventory)
+    # =========================
     "custom_links": {
         "inventory": [
             {
@@ -138,27 +159,41 @@ JAZZMIN_SETTINGS = {
                 "permissions": ["inventory.view_location"],
             },
             {
-                "name": "Pending Workflow",
+                "name": "Хүлээгдэж буй ажлууд",
                 "url": "/django-admin/inventory/workflow/pending/",
                 "icon": "fas fa-tasks",
-                "permissions": ["inventory.view_maintenanceservice", "inventory.view_controladjustment"],
+                "permissions": [
+                    "inventory.view_maintenanceservice",
+                    "inventory.view_controladjustment",
+                ],
             },
             {
-                "name": "Workflow Audit",
+                "name": "Хяналтын түүх (Audit)",
                 "url": "/django-admin/inventory/workflow/audit/",
                 "icon": "fas fa-clipboard-list",
                 "permissions": ["inventory.view_workflowauditlog"],
             },
+            
+            {            
+                "name": "📊 Тайлан (Reports)",
+                "url": "/django-admin/reports/",
+                "icon": "fas fa-chart-bar",
+                "permissions": ["inventory.view_device"],
+            },
+
         ],
     },
 
-    # Top menu
+    # =========================
+    # Top menu (upper bar)
+    # =========================
     "topmenu_links": [
-        {"name": "Admin", "url": "admin:index", "permissions": ["auth.view_user"]},
+        {"name": "Dashboard", "url": "admin:index"},
         {"name": "Газрын зураг", "url": "inventory_map", "permissions": ["inventory.view_location"]},
+        {"name": "Тайлан", "url": "reports-hub", "permissions": ["inventory.view_device"]},
     ],
 }
 
-# Allow embedding internal pages (e.g., maps) in Django admin iframes
+# ✅ Clickjacking / Leaflet admin map iframe зөвшөөрөх
 X_FRAME_OPTIONS = "SAMEORIGIN"
-
+    

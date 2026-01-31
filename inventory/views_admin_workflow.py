@@ -261,3 +261,146 @@ def workflow_review_action(request):
 
     obj.save()
     return JsonResponse({"ok": True, "kind": kind, "id": obj.id, "status": getattr(obj, "workflow_status", "")})
+
+
+# ============================================================
+# ✅ Workflow audit log (compat + production-safe)
+# Used by meteo_config/urls.py: wf.workflow_audit_log
+# ============================================================
+from django.views.decorators.http import require_GET
+from django.http import HttpResponse
+
+@staff_member_required
+@require_GET
+def workflow_audit_log(request):
+    """
+    Minimal audit log view.
+    - If you later add a dedicated WorkflowAuditLog model/table, you can swap implementation.
+    - For now, it builds an audit-like list from MaintenanceService/ControlAdjustment
+      using available timestamps (approved_at/rejected_at/created_at) and actors (approved_by/rejected_by).
+    """
+    q = (request.GET.get("q") or "").strip()
+    days = (request.GET.get("days") or "").strip()
+    kind = (request.GET.get("kind") or "").strip().upper()  # MAINT/CONTROL/blank
+    status = (request.GET.get("status") or "").strip().upper()  # APPROVED/REJECTED/SUBMITTED/PENDING/blank
+
+    # time window
+    dt_from = None
+    if days.isdigit():
+        dt_from = timezone.now() - timezone.timedelta(days=int(days))
+
+    def _pick_when(obj):
+        # prefer decision times
+        for f in ("approved_at", "rejected_at", "submitted_at", "created_at"):
+            if hasattr(obj, f):
+                v = getattr(obj, f)
+                if v:
+                    return v
+        return None
+
+    def _pick_actor(obj):
+        for f in ("approved_by", "rejected_by", "submitted_by", "created_by"):
+            if hasattr(obj, f):
+                v = getattr(obj, f)
+                if v:
+                    return v
+        return None
+
+    def _row(model_kind, obj):
+        d = getattr(obj, "device", None)
+        loc = getattr(d, "location", None) if d else None
+        aim = getattr(loc, "aimag_ref", None) if loc else None
+        org_obj = getattr(loc, "owner_org", None) if loc else None
+        if not org_obj and loc:
+            org_obj = getattr(loc, "org", None)
+
+        when = _pick_when(obj)
+        actor = _pick_actor(obj)
+        st = (getattr(obj, "workflow_status", "") or "").upper()
+
+        return {
+            "kind": model_kind,
+            "when": when,
+            "status": st,
+            "actor": str(actor) if actor else "-",
+            "device": str(d) if d else "-",
+            "device_url": _admin_url("inventory", "device", d.id) if d else "#",
+            "record_url": _admin_url("inventory", "maintenanceservice" if model_kind=="MAINT" else "controladjustment", obj.id),
+            "location": str(loc) if loc else "-",
+            "aimag": str(aim) if aim else "-",
+            "org": str(org_obj) if org_obj else "-",
+        }
+
+    rows = []
+
+    # Build querysets
+    ms_qs = MaintenanceService.objects.select_related(
+        "device", "device__location", "device__location__aimag_ref", "device__location__owner_org"
+    )
+    ca_qs = ControlAdjustment.objects.select_related(
+        "device", "device__location", "device__location__aimag_ref", "device__location__owner_org"
+    )
+
+    # Role-based scoping (same logic as pending)
+    user_aimag = _get_user_aimag(request)
+    is_aimag_engineer = request.user.groups.filter(name="AimagEngineer").exists()
+    if is_aimag_engineer and user_aimag:
+        ms_qs = ms_qs.filter(device__location__aimag_ref=user_aimag)
+        ca_qs = ca_qs.filter(device__location__aimag_ref=user_aimag)
+
+    # Status filter
+    if status:
+        ms_qs = ms_qs.filter(workflow_status__iexact=status)
+        ca_qs = ca_qs.filter(workflow_status__iexact=status)
+
+    # Date window: try all available time fields (safe OR)
+    if dt_from is not None:
+        ms_qs = ms_qs.filter(
+            Q(approved_at__gte=dt_from) | Q(rejected_at__gte=dt_from) | Q(submitted_at__gte=dt_from) | Q(created_at__gte=dt_from)
+        ) if hasattr(MaintenanceService, "approved_at") or hasattr(MaintenanceService, "created_at") else ms_qs
+        ca_qs = ca_qs.filter(
+            Q(approved_at__gte=dt_from) | Q(rejected_at__gte=dt_from) | Q(submitted_at__gte=dt_from) | Q(created_at__gte=dt_from)
+        ) if hasattr(ControlAdjustment, "approved_at") or hasattr(ControlAdjustment, "created_at") else ca_qs
+
+    # Query + collect (limit to prevent heavy page)
+    if kind in ("", "MAINT"):
+        for obj in ms_qs.order_by("-created_at")[:1500]:
+            r = _row("MAINT", obj)
+            if q:
+                hay = " ".join([str(r.get(k,"")) for k in ("status","actor","device","location","aimag","org")]).lower()
+                if q.lower() not in hay:
+                    continue
+            rows.append(r)
+
+    if kind in ("", "CONTROL"):
+        for obj in ca_qs.order_by("-created_at")[:1500]:
+            r = _row("CONTROL", obj)
+            if q:
+                hay = " ".join([str(r.get(k,"")) for k in ("status","actor","device","location","aimag","org")]).lower()
+                if q.lower() not in hay:
+                    continue
+            rows.append(r)
+
+    # Sort by time (fallback to minimal)
+    def _sort_key(r):
+        w = r.get("when")
+        return w or timezone.datetime.min.replace(tzinfo=timezone.get_current_timezone())
+    rows.sort(key=_sort_key, reverse=True)
+
+    ctx = {
+        "title": "Workflow Audit Log",
+        "rows": rows[:3000],
+        "filters": {"q": q, "days": days, "kind": kind, "status": status},
+    }
+
+    # Render if template exists; else return simple HTML
+    try:
+        return render(request, "admin/inventory/workflow_audit.html", ctx)
+    except Exception:
+        # Very small fallback
+        lines = [f"<h1>{ctx['title']}</h1>", "<ul>"]
+        for r in ctx["rows"][:200]:
+            when = r["when"].isoformat() if r.get("when") else "-"
+            lines.append(f"<li>{when} | {r['kind']} | {r['status']} | {r['device']} | {r['actor']}</li>")
+        lines.append("</ul>")
+        return HttpResponse("\n".join(lines))

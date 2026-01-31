@@ -1,87 +1,26 @@
-# meteo_config/urls.py
-from django.urls import path, include
+# meteo_config/urls.py (clean) - 2026-01-31
 from django.conf import settings
 from django.conf.urls.static import static
+from django.urls import include, path
 from django.shortcuts import redirect
 
-from django.contrib import admin  # default admin
-
-from inventory.admin_dashboard import (
-    dashboard_table_view,
-    dashboard_graph_view,
-    export_devices_csv,
-)
-
-from inventory.views import (
-    location_map,
-    station_map_view,
-    admin_data_entry,
-)
-
-from inventory.views_district_api import lookup_district_api
-from inventory.views_auth import force_password_change
-
-from inventory import views_admin_workflow as wf
+from inventory.admin import inventory_admin_site
 
 
 urlpatterns = [
-    # =========================
-    # 1) API
-    # =========================
-    path("api/geo/lookup-district/", lookup_district_api, name="lookup_district_api"),
+    # All app URLs are namespaced under "inventory:"
+    path("", include(("inventory.urls", "inventory"), namespace="inventory")),
 
-    # =========================
-    # 2) DASHBOARDS
-    # =========================
-    path("admin/dashboard/table/", dashboard_table_view, name="dashboard_table"),
-    path("admin/dashboard/graph/", dashboard_graph_view, name="dashboard_graph"),
-    path("admin/dashboard/export/devices.csv/", export_devices_csv, name="export_devices_csv"),
-    path("admin/dashboard/", lambda request: redirect("/admin/dashboard/graph/", permanent=False)),
+    # Custom admin site (namespace = "admin")
+    path("django-admin/", inventory_admin_site.urls),
 
-    # =========================
-    # 3) SHORTCUT REDIRECTS
-    # =========================
+    # Shortcuts
     path("admin/", lambda request: redirect("/django-admin/", permanent=False)),
     path("admin/login/", lambda request: redirect("/django-admin/login/", permanent=False)),
     path("admin/logout/", lambda request: redirect("/django-admin/logout/", permanent=False)),
-
-    # Admin data entry hub
-    path("admin/data-entry/", admin_data_entry, name="admin_data_entry"),
-
-    # =========================
-    # 4) INVENTORY URLS
-    # =========================
-    path("inventory/", include("inventory.urls")),
-
-    # =========================
-    # 5) MAP
-    # =========================
-    path("inventory/map/", location_map, name="inventory_map"),
-    path("inventory/map/one/", station_map_view, name="station_map_one"),
-
-    # =========================
-    # 6) FORCE PASSWORD CHANGE
-    # =========================
-    path("accounts/force-password-change/", force_password_change, name="inventory_force_password_change"),
-
-    # =========================
-    # 7) WORKFLOW endpoints  ✅ (admin-аас өмнө)
-    # =========================
-    path("django-admin/inventory/workflow/pending-counts/", wf.workflow_pending_counts, name="workflow_pending_counts"),
-    path("django-admin/inventory/workflow/review/", wf.workflow_review_action, name="workflow_review_action"),
-    path("django-admin/inventory/workflow/pending/", wf.workflow_pending_dashboard, name="workflow_pending_dashboard"),
-    path("django-admin/inventory/workflow/audit/", wf.workflow_audit_log, name="workflow_audit_log"),
-
-    # =========================
-    # 8) DJANGO ADMIN (main)
-    # =========================
-    path("django-admin/", admin.site.urls),
 ]
 
-
-# =========================
 # Static / Media (DEBUG үед)
-# =========================
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
     if getattr(settings, "MEDIA_URL", None) and getattr(settings, "MEDIA_ROOT", None):
