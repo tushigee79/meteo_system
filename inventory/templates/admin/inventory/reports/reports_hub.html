@@ -1,0 +1,298 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block extrastyle %}
+<link rel="stylesheet" href="{% static 'admin/css/vendor/select2/select2.min.css' %}">
+<link rel="stylesheet" href="{% static 'admin/css/widgets.css' %}">
+<style>
+  .rh-wrap { max-width: 1400px; }
+  .rh-title { margin: 4px 0 14px; }
+
+  .rh-filters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+    margin-bottom: 12px;
+    align-items: end;
+  }
+  .rh-filters .field label { display:block; font-size:12px; opacity:.8; margin-bottom:4px; }
+  .rh-span { grid-column: 1 / -1; }
+  .rh-inline { display:flex; gap:10px; flex-wrap:wrap; }
+  .rh-inline .sub { min-width: 220px; flex: 1; }
+
+  .rh-actions { display:flex; gap:10px; align-items:center; margin: 10px 0 14px; flex-wrap:wrap; }
+  .rh-actions .btn-group { display:flex; gap:8px; flex-wrap:wrap; }
+
+  .rh-cards { display:grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 10px 0 16px; }
+  .rh-card { border:1px solid #ddd; border-radius:12px; padding:12px; background:#fff; }
+  .rh-card .k { font-size:12px; opacity:.75; }
+  .rh-card .v { font-size:22px; font-weight:700; margin-top:2px; }
+
+  .rh-charts { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .rh-chartcard { border:1px solid #eee; border-radius:12px; background:#fff; padding:10px; }
+  .rh-chart { height: 360px; }
+
+  .rh-grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .rh-tablewrap { border:1px solid #eee; border-radius:12px; background:#fff; padding:10px; overflow:auto; }
+  .rh-tablewrap h3 { margin: 0 0 8px; font-size: 14px; }
+  table.rh-table { width: 100%; border-collapse: collapse; }
+  table.rh-table th, table.rh-table td { padding: 6px 8px; border-bottom: 1px solid rgba(0,0,0,.06); font-size: 13px; }
+  table.rh-table th { text-align:left; font-weight:700; }
+
+  @media (max-width: 1100px){
+    .rh-charts { grid-template-columns: 1fr; }
+    .rh-cards { grid-template-columns: repeat(2, 1fr); }
+    .rh-grid2 { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rh-wrap">
+  <h1 class="rh-title">{{ title }}</h1>
+
+  <form method="get" action="{{ hub_url }}" id="rhForm">
+    <div class="rh-filters">
+      <div class="field">
+        <label for="id_report">Тайлангийн төрөл</label>
+        <select id="id_report" name="report" class="rh-select">
+          {% for k, v in REPORT_CHOICES %}
+            <option value="{{ k }}" {% if filter.report == k %}selected{% endif %}>{{ v }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="id_metric">Графикийн төрөл (metric)</label>
+        <select id="id_metric" name="metric" class="rh-select">
+          {% for k, v in METRIC_CHOICES %}
+            <option value="{{ k }}" {% if filter.metric == k %}selected{% endif %}>{{ v }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="id_aimag">Аймаг</label>
+        <select id="id_aimag" name="aimag" class="rh-select" {% if is_scoped_user %}disabled{% endif %}>
+          <option value="">{% if is_scoped_user %}—{% else %}Бүгд{% endif %}</option>
+          {% for a in AIMAG_CHOICES %}
+            <option value="{{ a.0 }}" {% if filter.aimag == a.0|stringformat:"s" %}selected{% endif %}>{{ a.1 }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="id_sum">Сум / Дүүрэг</label>
+        <select id="id_sum" name="sum" class="rh-select">
+          <option value="">Бүгд</option>
+          {% for s in SUM_CHOICES %}
+            <option value="{{ s.0 }}" {% if filter.sum == s.0|stringformat:"s" %}selected{% endif %}>{{ s.1 }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field rh-span">
+        <label>Kind + Location type + Status</label>
+        <div class="rh-inline">
+          <div class="sub">
+            <select id="id_kind" name="kind" class="rh-select">
+              <option value="">Kind: бүгд</option>
+              {% for k, v in KIND_CHOICES %}
+                <option value="{{ k }}" {% if filter.kind == k %}selected{% endif %}>{{ v }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="sub">
+            <select id="id_location_type" name="location_type" class="rh-select">
+              <option value="">Location type: бүгд</option>
+              {% for k, v in LOCATION_TYPE_CHOICES %}
+                <option value="{{ k }}" {% if filter.location_type == k %}selected{% endif %}>{{ v }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="sub">
+            <select id="id_status" name="status" class="rh-select">
+              <option value="">Status: бүгд</option>
+              {% for k, v in STATUS_CHOICES %}
+                <option value="{{ k }}" {% if filter.status == k %}selected{% endif %}>{{ v }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="id_date_from">Огноо (from)</label>
+        <input id="id_date_from" type="text" name="date_from" value="{{ filter.date_from }}" class="vTextField" placeholder="2026-01-01">
+      </div>
+
+      <div class="field">
+        <label for="id_date_to">Огноо (to)</label>
+        <input id="id_date_to" type="text" name="date_to" value="{{ filter.date_to }}" class="vTextField" placeholder="2026-01-31">
+      </div>
+    </div>
+
+    <div class="rh-actions">
+      <button type="submit" class="button default">🔎 Шүүх</button>
+
+      <div class="btn-group">
+        {% for e in EXPORT_LINKS %}
+          <a class="button" href="{{ e.url }}?{{ request.GET.urlencode }}">⬇ {{ e.label }}</a>
+        {% endfor %}
+      </div>
+
+      <span style="opacity:.7;font-size:12px;">(Одоогийн filter-ээр экспортолно)</span>
+    </div>
+  </form>
+
+  <div class="rh-cards">
+    {% for c in CARDS %}
+      <div class="rh-card">
+        <div class="k">{{ c.k }}</div>
+        <div class="v">{{ c.v }}</div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="rh-charts">
+    <div class="rh-chartcard">
+      <div class="k">Counts</div>
+      <div class="rh-chart" id="chart_counts"></div>
+    </div>
+    <div class="rh-chartcard">
+      <div class="k">Workflow</div>
+      <div class="rh-chart" id="chart_workflow"></div>
+    </div>
+  </div>
+
+  <div class="rh-grid2">
+    <div class="rh-tablewrap">
+      <h3>Status breakdown</h3>
+      <table class="rh-table" id="tbl_status">
+        <thead><tr><th>Status</th><th>Count</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="rh-tablewrap">
+      <h3>Workflow per day (last 20 rows)</h3>
+      <table class="rh-table" id="tbl_workflow">
+        <thead><tr><th>Date</th><th>Maintenance</th><th>Control</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script src="{% static 'admin/js/vendor/jquery/jquery.min.js' %}"></script>
+<script src="{% static 'admin/js/vendor/select2/select2.full.min.js' %}"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+
+<script>
+(function($){
+  function initSelect2(){
+    $('.rh-select').select2({ width: '100%' });
+  }
+
+  function loadSums(aimagId, selectedSum){
+    $.getJSON("{{ sums_url }}", { aimag_id: aimagId || "" }, function(data){
+      const $sel = $('#id_sum');
+      const keep = $sel.val();
+      $sel.empty();
+      $sel.append($('<option>').attr('value','').text('Бүгд'));
+      const sums = (data && data.sums) ? data.sums : [];
+      for (const s of sums){
+        const opt = $('<option>').attr('value', String(s.id)).text(String(s.name));
+        if (selectedSum && String(selectedSum) === String(s.id)) opt.attr('selected', 'selected');
+        $sel.append(opt);
+      }
+      if (!selectedSum && keep) $sel.val(keep);
+      $sel.trigger('change.select2');
+    });
+  }
+
+  function buildBarOption(title, rows){
+    return {
+      title: { text: title, left: 'center' },
+      tooltip: { trigger: 'axis' },
+      xAxis: { type: 'category', data: rows.map(r=>r.name), axisLabel:{ interval:0, rotate: 30 } },
+      yAxis: { type: 'value' },
+      series: [{ type: 'bar', data: rows.map(r=>r.value) }]
+    };
+  }
+
+  function buildLineOption(title, axis, ms, ca){
+    return {
+      title: { text: title, left: 'center' },
+      tooltip: { trigger: 'axis' },
+      legend: { top: 26, data: ['MS', 'CA'] },
+      xAxis: { type: 'category', data: axis, axisLabel:{ interval: 4 } },
+      yAxis: { type: 'value' },
+      series: [
+        { name: 'MS', type: 'line', data: ms || [] },
+        { name: 'CA', type: 'line', data: ca || [] }
+      ]
+    };
+  }
+
+  function fillStatusTable(rows){
+    const tb = document.querySelector('#tbl_status tbody');
+    tb.innerHTML = '';
+    for (const r of (rows || [])){
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${r.name}</td><td>${r.value}</td>`;
+      tb.appendChild(tr);
+    }
+  }
+
+  function fillWorkflowTable(axis, ms, ca){
+    const tb = document.querySelector('#tbl_workflow tbody');
+    tb.innerHTML = '';
+    const n = Math.min((axis||[]).length, 20);
+    const start = Math.max(0, (axis||[]).length - n);
+    for (let i=start; i<(axis||[]).length; i++){
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${axis[i]}</td><td>${(ms||[])[i]||0}</td><td>${(ca||[])[i]||0}</td>`;
+      tb.appendChild(tr);
+    }
+  }
+
+  function refreshCharts(){
+    const params = $('#rhForm').serialize();
+    fetch("{{ chart_url }}?" + params)
+      .then(r=>r.json())
+      .then(data=>{
+        const rows = (data.counts && data.counts.status) ? data.counts.status : [];
+        cCounts.setOption(buildBarOption("Counts", rows), true);
+        fillStatusTable(rows);
+
+        const wf = data.workflow || {};
+        cWf.setOption(buildLineOption("Workflow (per day)", wf.axis || [], wf.ms || [], wf.ca || []), true);
+        fillWorkflowTable(wf.axis || [], wf.ms || [], wf.ca || []);
+      })
+      .catch(e=>console.error("chart fetch failed:", e));
+  }
+
+  let cCounts = null;
+  let cWf = null;
+
+  $(document).ready(function(){
+    initSelect2();
+
+    cCounts = echarts.init(document.getElementById('chart_counts'));
+    cWf = echarts.init(document.getElementById('chart_workflow'));
+
+    loadSums($('#id_aimag').val(), "{{ filter.sum }}");
+    $('#id_aimag').on('change', function(){ loadSums($(this).val(), ""); });
+
+    $('#id_metric').on('change', function(){ document.getElementById("rhForm").submit(); });
+
+    refreshCharts();
+
+    window.addEventListener('resize', function(){
+      try { cCounts.resize(); cWf.resize(); } catch(e){}
+    });
+  });
+})(django.jQuery);
+</script>
+{% endblock %}

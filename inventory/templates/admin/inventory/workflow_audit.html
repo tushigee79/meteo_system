@@ -1,0 +1,60 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+<div class="container-fluid" style="max-width:1200px;">
+  <h1 style="margin: 8px 0 14px;">Workflow Audit Log</h1>
+
+  <form method="get" style="margin-bottom:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+    <div>
+      <label style="display:block;font-size:12px;opacity:.75;">Action</label>
+      <select name="action">
+        <option value="" {% if not filters.action %}selected{% endif %}>ALL</option>
+        <option value="APPROVE" {% if filters.action == "APPROVE" %}selected{% endif %}>APPROVE</option>
+        <option value="REJECT" {% if filters.action == "REJECT" %}selected{% endif %}>REJECT</option>
+      </select>
+    </div>
+    <div>
+      <label style="display:block;font-size:12px;opacity:.75;">Model</label>
+      <input type="text" name="model" value="{{ filters.model|default:'' }}" placeholder="MaintenanceService / ControlAdjustment" />
+    </div>
+    <div style="flex:1; min-width:260px;">
+      <label style="display:block;font-size:12px;opacity:.75;">Search</label>
+      <input type="text" name="q" value="{{ filters.q|default:'' }}" placeholder="comment, username..." style="width:100%;" />
+    </div>
+    <div>
+      <button class="button default" type="submit">Apply</button>
+      <a class="button" href="?">Reset</a>
+    </div>
+  </form>
+
+  <div class="results">
+    <table class="table table-striped" style="width:100%;">
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>User</th>
+          <th>Action</th>
+          <th>Model</th>
+          <th>Record ID</th>
+          <th>Comment</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for l in logs %}
+          <tr>
+            <td style="white-space:nowrap;">{{ l.created_at }}</td>
+            <td>{{ l.user.username }}</td>
+            <td><b>{{ l.action }}</b></td>
+            <td>{{ l.model_name }}</td>
+            <td>{{ l.record_id }}</td>
+            <td style="max-width:520px; white-space:pre-wrap;">{{ l.comment }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="6" style="padding:16px;opacity:.75;">No audit logs.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
