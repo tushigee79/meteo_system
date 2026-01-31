@@ -751,11 +751,25 @@ class DeviceAdmin(admin.ModelAdmin):
             return format_html('<span style="color:#dc3545;font-weight:700">⛔ Дууссан</span>')
 
         left = (d - today).days
-        if left <= 30:
-            return format_html('<span style="color:#fd7e14;font-weight:700">⚠️ ≤30 ({:d} өдөр)</span>', left)
-        if left <= 90:
-            return format_html('<span style="color:#0d6efd;font-weight:700">🔵 ≤90 ({:d} өдөр)</span>', left)
-        return format_html('<span style="color:#198754;font-weight:700">✅ OK ({:d} өдөр)</span>', left)
+        left_i = int(left or 0)
+
+        if left_i <= 30:
+            return format_html(
+                '<span style="color:#fd7e14;font-weight:700">⚠️ ≤30 ({} өдөр)</span>',
+                left_i,
+            )
+        if left_i <= 90:
+            return format_html(
+                '<span style="color:#0d6efd;font-weight:700">🔵 ≤90 ({} өдөр)</span>',
+                left_i,
+            )
+
+        return format_html(
+            '<span style="color:#198754;font-weight:700">✅ OK ({} өдөр)</span>',
+            left_i,
+        )
+
+
 
     def get_urls(self):
         urls = super().get_urls()
