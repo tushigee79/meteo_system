@@ -1,0 +1,223 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}Dashboard Table{% endblock %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .wrap { padding: 14px; }
+  .card { background:#fff; border:1px solid rgba(0,0,0,.08); border-radius:14px; padding:12px; margin-top:12px; }
+  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:end; }
+  .k { font-size:12px; opacity:.7; }
+  .v { font-size:22px; font-weight:900; }
+  input[type="date"], select, input[type="text"] {
+    padding: 7px 10px; border-radius:10px; border:1px solid rgba(0,0,0,.18);
+    min-width: 170px;
+  }
+  .btn {
+    display:inline-block; padding:8px 12px; border-radius:10px;
+    border:1px solid rgba(0,0,0,.12); background:#fff; text-decoration:none; cursor:pointer;
+  }
+  .btn.primary { background:#447e9b; color:#fff; border-color:#447e9b; }
+  .btn:hover { filter:brightness(.98); }
+  .muted { font-size:12px; opacity:.75; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { padding:8px 10px; border-bottom:1px solid rgba(0,0,0,.06); white-space:nowrap; }
+  th { text-align:left; font-weight:900; font-size:12px; opacity:.8; }
+  tbody tr:hover { background: rgba(0,0,0,.02); }
+  .scroll { overflow:auto; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <h1 style="margin:0;font-weight:900;">Dashboard Table</h1>
+
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+      <div>
+        <div style="font-weight:900;">Pending workflow</div>
+        <div class="muted">Одоогоор pending counts байхгүй бол 0 гэж харагдана.</div>
+      </div>
+      <div>
+        <div class="k">Total</div>
+        <div class="v" id="pending_total">0</div>
+      </div>
+    </div>
+    <div class="muted" id="pending_note" style="margin-top:6px;">No pending counts yet.</div>
+  </div>
+
+  <div class="card">
+    <div style="font-weight:900;margin-bottom:10px;">Filters</div>
+
+    <div class="row">
+      <div>
+        <div class="k">Date from</div>
+        <input type="date" id="id_date_from">
+      </div>
+
+      <div>
+        <div class="k">Date to</div>
+        <input type="date" id="id_date_to">
+      </div>
+
+      <div>
+        <div class="k">Report</div>
+        <select id="id_report">
+          <option value="movements">Movements</option>
+          <option value="maintenance">Maintenance</option>
+          <option value="control">Control</option>
+        </select>
+      </div>
+
+      <div>
+        <div class="k">Location type</div>
+        <select id="id_location_type">
+          <option value="">— All —</option>
+          <option value="AWS">AWS</option>
+          <option value="METEO">METEO</option>
+          <option value="HYDRO">HYDRO</option>
+          <option value="RADAR">RADAR</option>
+          <option value="AEROLOGY">AEROLOGY</option>
+          <option value="AGRO">AGRO</option>
+        </select>
+      </div>
+
+      <div style="min-width:260px;">
+        <div class="k">Search</div>
+        <input type="text" id="id_q" placeholder="device/serial/reason...">
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:end;">
+        <button class="btn primary" id="btn_apply" type="button">Шүүх</button>
+        <button class="btn" id="btn_reset" type="button">Reset</button>
+      </div>
+
+      <div class="muted" id="table_note" style="align-self:center;"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="font-weight:900;margin-bottom:10px;">Table</div>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:60px;">#</th>
+            <th id="th1">C1</th>
+            <th id="th2">C2</th>
+            <th id="th3">C3</th>
+            <th id="th4">C4</th>
+            <th id="th5">C5</th>
+            <th id="th6">C6</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const $ = (id)=>document.getElementById(id);
+
+  function iso(d){ return d.toISOString().slice(0,10); }
+
+  // default: last 30 days
+  const now = new Date();
+  const dfrom = new Date(now.getTime() - 30*24*3600*1000);
+  $("id_date_from").value = iso(dfrom);
+  $("id_date_to").value = iso(now);
+  $("id_report").value = "movements";
+
+  function setHeaders(report){
+    const map = {
+      movements: ["Огноо", "Багаж", "Эх байр", "Очих байр", "Шалтгаан", "Шилжүүлсэн"],
+      maintenance: ["Огноо", "Багаж", "Workflow", "Performer", "Шалтгаан", ""],
+      control: ["Огноо", "Багаж", "Workflow", "Result", "Performer", ""],
+    };
+    const h = map[report] || ["C1","C2","C3","C4","C5","C6"];
+    $("th1").textContent = h[0] || "";
+    $("th2").textContent = h[1] || "";
+    $("th3").textContent = h[2] || "";
+    $("th4").textContent = h[3] || "";
+    $("th5").textContent = h[4] || "";
+    $("th6").textContent = h[5] || "";
+  }
+
+  function buildUrl(){
+    const params = new URLSearchParams();
+    params.set("report", $("id_report").value || "movements");
+
+    const df = $("id_date_from").value;
+    const dt = $("id_date_to").value;
+    const lt = $("id_location_type").value;
+    const q  = ($("id_q").value || "").trim();
+
+    if(df) params.set("date_from", df);
+    if(dt) params.set("date_to", dt);
+    if(lt) params.set("location_type", lt);
+    if(q)  params.set("q", q);
+
+    // ✅ backend endpoint: /django-admin/reports/table.json
+    return "/django-admin/reports/table.json?" + params.toString();
+  }
+
+  async function loadTable(){
+    const report = $("id_report").value || "movements";
+    setHeaders(report);
+
+    $("table_note").textContent = "Loading...";
+    $("tbody").innerHTML = "";
+
+    const res = await fetch(buildUrl(), { headers: {"X-Requested-With":"XMLHttpRequest"} });
+    const data = await res.json().catch(()=>null);
+
+    if(!res.ok){
+      $("table_note").textContent = "Error loading table";
+      return;
+    }
+    if(!Array.isArray(data)){
+      $("table_note").textContent = "Bad response (expected array)";
+      return;
+    }
+
+    let i = 0;
+    for(const r of data){
+      i++;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${i}</td>
+        <td>${r.c1 ?? ""}</td>
+        <td>${r.c2 ?? ""}</td>
+        <td>${r.c3 ?? ""}</td>
+        <td>${r.c4 ?? ""}</td>
+        <td>${r.c5 ?? ""}</td>
+        <td>${r.c6 ?? ""}</td>
+      `;
+      $("tbody").appendChild(tr);
+    }
+
+    $("table_note").textContent = `Rows: ${data.length}`;
+    $("pending_total").textContent = "0";
+    $("pending_note").textContent = "No pending counts yet.";
+  }
+
+  $("btn_apply").addEventListener("click", loadTable);
+  $("btn_reset").addEventListener("click", ()=>{
+    $("id_q").value = "";
+    $("id_location_type").value = "";
+    $("id_report").value = "movements";
+    $("id_date_from").value = iso(dfrom);
+    $("id_date_to").value = iso(now);
+    loadTable();
+  });
+
+  $("id_report").addEventListener("change", loadTable);
+
+  loadTable();
+})();
+</script>
+{% endblock %}

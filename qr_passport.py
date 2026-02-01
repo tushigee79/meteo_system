@@ -1,166 +1,170 @@
-# inventory/qr_passport.py
-from __future__ import annotations
-
+import os
 from io import BytesIO
-from dataclasses import dataclass
-from typing import Optional
-
-from django.http import HttpRequest
 from django.conf import settings
+from django.http import HttpResponse
 
-import uuid
-
-# ReportLab is installed in your environment (used elsewhere in your project)
+# ReportLab сангууд
+from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-from reportlab.pdfgen import canvas
-from reportlab.lib.utils import ImageReader
+from reportlab.lib.units import mm, inch
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.graphics.barcode import qr
+from reportlab.graphics import renderPDF
+from reportlab.graphics.shapes import Drawing
 
+def register_mongolian_font():
+    """Монгол фонтыг бүртгэх функц"""
+    # Төслийн static хавтас дотор fonts/Arial.ttf байгаа гэж үзэв
+    font_path = os.path.join(settings.BASE_DIR, 'static', 'fonts', 'Arial.ttf')
+    
+    # Хэрэв static дотор байхгүй бол Windows/Linux системийн фонтыг шалгах (fallback)
+    if not os.path.exists(font_path):
+        # Хөгжүүлэлтийн үед түр зуур хэрэглэх зам (өөрийнхөөрөө солино уу)
+        font_path = r"C:\Windows\Fonts\arial.ttf" 
 
-@dataclass
-class PassportRenderOptions:
-    title_mn: str = "БАГАЖНЫ ТЕХНИК ПАСПОРТ"
-    title_en: str = "DEVICE PASSPORT"
-    # Optional logo: put a PNG at static/logo_namem.png (or change path below)
-    logo_static_path: str = "static/logo_namem.png"
-    show_public_url: bool = True
-
-
-def _absolute_logo_path(opts: PassportRenderOptions) -> Optional[str]:
-    # Tries BASE_DIR/static/... first; if not found, returns None.
     try:
-        base_dir = getattr(settings, "BASE_DIR", None)
-        if not base_dir:
-            return None
-        p = str(base_dir / opts.logo_static_path)
-        return p if p and __import__("os").path.exists(p) else None
-    except Exception:
-        return None
+        if os.path.exists(font_path):
+            pdfmetrics.registerFont(TTFont('Arial', font_path))
+            return 'Arial'
+        else:
+            print(f"Warning: Font not found at {font_path}. Using default Helvetica.")
+            return 'Helvetica' # Кирилл үсэг танихгүй
+    except Exception as e:
+        print(f"Font registration error: {e}")
+        return 'Helvetica'
 
+def generate_qr_code(data_string):
+    """QR код үүсгэж Drawing объект буцаана"""
+    qr_code = qr.QrCodeWidget(data_string)
+    qr_code.barWidth = 35 * mm
+    qr_code.barHeight = 35 * mm
+    qr_code.qrVersion = 1
+    
+    d = Drawing(45 * mm, 45 * mm)
+    d.add(qr_code)
+    return d
 
-def _build_public_url(request: HttpRequest, token: uuid.UUID) -> str:
-    # Uses request.build_absolute_uri so it works on dev/prod.
-    return request.build_absolute_uri(f"/qr/public/{token}/")
+def render_device_passport_pdf(request, device):
+    """Төхөөрөмжийн паспортыг PDF хэлбэрээр үүсгэх"""
+    
+    # 1. Тохиргоо
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=20*mm, leftMargin=20*mm,
+        topMargin=20*mm, bottomMargin=20*mm,
+        title=f"Passport - {device.serial_number}"
+    )
+    
+    elements = []
+    
+    # 2. Фонт болон Стайл бэлтгэх
+    font_name = register_mongolian_font()
+    styles = getSampleStyleSheet()
+    
+    # Гарчгийн стайл
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontName=font_name,
+        fontSize=18,
+        alignment=1, # Center
+        spaceAfter=10*mm
+    )
+    
+    # Энгийн текстийн стайл
+    normal_style = ParagraphStyle(
+        'CustomNormal',
+        parent=styles['Normal'],
+        fontName=font_name,
+        fontSize=10,
+        leading=14, # Мөр хоорондын зай
+    )
+    
+    # Хүснэгтийн толгой стайл
+    header_style = ParagraphStyle(
+        'TableHeader',
+        parent=styles['Normal'],
+        fontName=font_name,
+        fontSize=10,
+        textColor=colors.whitesmoke,
+        alignment=1, # Center
+        fontName_bold=font_name # Bold байхгүй бол энгийнээр
+    )
 
+    # 3. QR Код болон Гарчиг
+    # QR URL үүсгэх (Танай домайн тохиргооноос хамаарна)
+    domain = request.build_absolute_uri('/')[:-1]
+    qr_url = f"{domain}/qr/public/{getattr(device, 'qr_token', '')}/"
+    qr_drawing = generate_qr_code(qr_url)
 
-def render_device_passport_pdf(
-    *,
-    request: HttpRequest,
-    device,
-    opts: PassportRenderOptions | None = None,
-) -> bytes:
-    """
-    Returns PDF bytes (A4) for a given Device instance.
-    Assumes device has: serial_number, kind, status, qr_token, qr_image (optional),
-    location (optional), catalog_item (optional), other_name (optional).
-    """
-    opts = opts or PassportRenderOptions()
+    # Гарчиг болон QR кодыг зэрэгцүүлж тавих (Table ашиглана)
+    title_text = f"ТӨХӨӨРӨМЖИЙН ПАСПОРТ<br/><font size=12>{device.name}</font>"
+    
+    header_data = [
+        [Paragraph(title_text, title_style), qr_drawing]
+    ]
+    
+    header_table = Table(header_data, colWidths=[120*mm, 50*mm])
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('ALIGN', (1,0), (1,0), 'RIGHT'),
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 10*mm))
 
-    buf = BytesIO()
-    c = canvas.Canvas(buf, pagesize=A4)
-    w, h = A4
+    # 4. Төхөөрөмжийн мэдээллийн хүснэгт
+    # None утгуудыг хоосон мөр болгох
+    def check(val): return str(val) if val else "-"
 
-    # --- header ---
-    c.setTitle(f"passport_{getattr(device, 'serial_number', device.pk)}")
+    data = [
+        # Толгой
+        ["Үзүүлэлт", "Утга"],
+        # Мэдээлэл
+        ["Төхөөрөмжийн нэр", Paragraph(check(device.name), normal_style)],
+        ["Сериал дугаар", Paragraph(check(device.serial_number), normal_style)],
+        ["Төрөл (Kind)", Paragraph(check(device.kind), normal_style)],
+        ["Модель", Paragraph(check(device.model), normal_style)],
+        ["Үйлдвэрлэгч", Paragraph(check(device.manufacturer), normal_style)],
+        ["Суурилуулсан огноо", check(device.installation_date)],
+        ["Төлөв", check(device.status)],
+        ["Байршил", Paragraph(str(device.location) if device.location else "Тодорхойгүй", normal_style)],
+    ]
 
-    # logo (optional)
-    logo_path = _absolute_logo_path(opts)
-    if logo_path:
-        try:
-            c.drawImage(ImageReader(logo_path), 15*mm, h - 30*mm, width=22*mm, height=22*mm, preserveAspectRatio=True, mask='auto')
-        except Exception:
-            pass
+    # Хүснэгтийн дизайн
+    table = Table(data, colWidths=[60*mm, 110*mm])
+    table.setStyle(TableStyle([
+        # Толгой хэсгийн дизайн
+        ('BACKGROUND', (0, 0), (-1, 0), colors.Color(0.2, 0.4, 0.6)), # Цэнхэр дэвсгэр
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('FONTNAME', (0, 0), (-1, -1), font_name),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        
+        # Их биеийн дизайн
+        ('BACKGROUND', (0, 1), (-1, -1), colors.whitesmoke),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), # Хүрээ
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'), # Текстийг дээр нь шахах
+        ('PADDING', (0, 0), (-1, -1), 6),
+    ]))
+    
+    elements.append(table)
+    elements.append(Spacer(1, 10*mm))
 
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(45*mm, h - 18*mm, opts.title_mn)
-    c.setFont("Helvetica", 11)
-    c.drawString(45*mm, h - 26*mm, opts.title_en)
+    # 5. Нэмэлт тайлбар (Description)
+    if device.description:
+        elements.append(Paragraph("<b>Нэмэлт тайлбар:</b>", normal_style))
+        elements.append(Spacer(1, 2*mm))
+        elements.append(Paragraph(check(device.description), normal_style))
 
-    # --- device fields ---
-    y = h - 45*mm
-    line = 7*mm
-
-    def row(label_mn: str, label_en: str, value: str):
-        nonlocal y
-        c.setFont("Helvetica-Bold", 10)
-        c.drawString(15*mm, y, f"{label_mn}:")
-        c.setFont("Helvetica", 10)
-        c.drawString(60*mm, y, str(value or ""))
-        y -= line
-        c.setFont("Helvetica", 8)
-        c.drawString(15*mm, y+2.2*mm, f"{label_en}")
-        y -= (line - 2*mm)
-
-    serial = getattr(device, "serial_number", "") or ""
-    kind = getattr(device, "kind", "") or ""
-    status = getattr(device, "status", "") or ""
-
-    # display name
-    cat = getattr(device, "catalog_item", None)
-    other_name = getattr(device, "other_name", "") or ""
-    disp = ""
-    try:
-        if cat:
-            disp = getattr(cat, "name_mn", "") or getattr(cat, "name", "") or ""
-    except Exception:
-        disp = ""
-    if not disp:
-        disp = other_name
-
-    loc = getattr(device, "location", None)
-    loc_name = getattr(loc, "name", "") if loc else ""
-
-    row("Серийн дугаар", "Serial number", serial)
-    row("Нэр", "Name", disp)
-    row("Төрөл", "Type", kind)
-    row("Төлөв", "Status", status)
-    row("Байршил", "Location", loc_name)
-
-    # --- QR block ---
-    # right side box
-    box_x = w - 65*mm
-    box_y = h - 105*mm
-    box_w = 50*mm
-    box_h = 60*mm
-    c.setLineWidth(0.6)
-    c.rect(box_x, box_y, box_w, box_h, stroke=1, fill=0)
-
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(box_x + 5*mm, box_y + box_h - 10*mm, "QR / Link")
-
-    token = getattr(device, "qr_token", None)
-    public_url = _build_public_url(request, token) if (token and opts.show_public_url) else ""
-
-    # draw QR image if exists
-    qr_img_field = getattr(device, "qr_image", None)
-    qr_path = None
-    try:
-        if qr_img_field and getattr(qr_img_field, "path", None):
-            qr_path = qr_img_field.path
-    except Exception:
-        qr_path = None
-
-    if qr_path:
-        try:
-            c.drawImage(ImageReader(qr_path), box_x + 7*mm, box_y + 17*mm, width=36*mm, height=36*mm, preserveAspectRatio=True, mask='auto')
-        except Exception:
-            pass
-
-    # show URL text (wrapped)
-    if public_url:
-        c.setFont("Helvetica", 7)
-        # manual wrap
-        max_chars = 38
-        lines = [public_url[i:i+max_chars] for i in range(0, len(public_url), max_chars)]
-        yy = box_y + 12*mm
-        for ln in lines[:3]:
-            c.drawString(box_x + 5*mm, yy, ln)
-            yy -= 3.5*mm
-
-    # footer
-    c.setFont("Helvetica", 7)
-    c.drawRightString(w - 15*mm, 12*mm, "NAMEM / БҮРТГЭЛ – generated")
-
-    c.showPage()
-    c.save()
-    return buf.getvalue()
+    # 6. PDF үүсгэх
+    doc.build(elements)
+    
+    # Bytes буцаах
+    pdf = buffer.getvalue()
+    buffer.close()
+    return pdf

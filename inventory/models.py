@@ -240,6 +240,44 @@ class Device(models.Model):
         verbose_name="Төрөл",
     )
 
+    
+    def save(self, *args, **kwargs):
+        # 1. Хэрэв QR зураг байхгүй бол шинээр үүсгэнэ
+        if not self.qr_image:
+            # QR кодын тохиргоо
+            qr = qrcode.QRCode(
+                version=1,
+                error_correction=qrcode.constants.ERROR_CORRECT_L,
+                box_size=10,
+                border=4,
+            )
+            
+            # QR дотор хадгалах өгөгдөл (Public URL)
+            # Жишээ нь: https://meteo.gov.mn/qr/public/TOKEN/
+            # Одоогоор зөвхөн token-оо хийж турших эсвэл домайнаа хатуу бичиж болно
+            qr_data = f"/qr/public/{self.qr_token}/" 
+            qr.add_data(qr_data)
+            qr.make(fit=True)
+
+            # Зураг болгох
+            img = qr.make_image(fill_color="black", back_color="white")
+
+            # Санах ой руу хадгалах (Buffer)
+            buffer = BytesIO()
+            img.save(buffer, format="PNG")
+            
+            # Файлын нэр өгөх (qr_сериал.png)
+            filename = f"qr_{self.serial_number}.png"
+            
+            # ImageField-д хадгалах (save=False нь дахин loop-д орохоос сэргийлнэ)
+            self.qr_image.save(filename, ContentFile(buffer.getvalue()), save=False)
+
+        # 2. Үндсэн хадгалах үйлдлийг дуудах
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.name} ({self.serial_number})"
+
     catalog_item = models.ForeignKey(
         InstrumentCatalog,
         on_delete=models.PROTECT,
