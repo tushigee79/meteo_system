@@ -25,7 +25,8 @@ from django.utils.text import slugify
 from . import views_admin_workflow as wf
 from .device_passport_pdf import generate_device_passport_pdf
 from .pdf_passport import generate_device_passport_pdf_bytes
-from .reports_hub import (
+from .reports_hub_compat import (
+
     reports_hub_view,
     reports_chart_json,
     reports_sums_by_aimag,
@@ -37,6 +38,7 @@ from .reports_hub import (
     reports_export_movements_csv,
     reports_export_spareparts_csv,
     reports_export_auth_audit_csv,
+    reports_table_json,
 )
 from .models import (
     Aimag,
@@ -555,22 +557,43 @@ class LocationAdmin(admin.ModelAdmin):
     def get_urls(self):
         urls = super().get_urls()
         custom = [
-            path(
-                "sums-by-aimag/",
-                self.admin_site.admin_view(self.sums_by_aimag_view),
-                name="location_sums_by_aimag",
-            ),
-            path(
-                "map/",
-                self.admin_site.admin_view(self.map_view),
-                name="inventory_location_map",
-            ),
-            path(
-                "map/<int:location_id>/",
-                self.admin_site.admin_view(self.map_one_view),
-                name="inventory_location_map_one",
-            ),
+            # ✅ LocationAdmin-д зөвхөн Location-той холбоотой custom url-ууд байна
+            path("sums-by-aimag/", self.admin_site.admin_view(self.sums_by_aimag_view), name="locations-sums-by-aimag"),
+            path("map/", self.admin_site.admin_view(self.map_view), name="inventory_location_map"),
+            path("<int:location_id>/map-one/", self.admin_site.admin_view(self.map_one_view), name="inventory_location_map_one"),
         ]
+        return custom + urls
+
+    def sums_by_aimag_view(self, request: HttpRequest):
+        """Аймаг сонгоход харгалзах сумдыг JSON-оор буцаах (Select2-т зориулагдсан)"""
+        aimag_id = (request.GET.get("aimag_id") or "").strip()
+        qs = SumDuureg.objects.all().order_by("name")
+        if aimag_id:
+            qs = qs.filter(aimag_id=aimag_id)
+        results = [{"id": s.id, "name": getattr(s, "name_mn", str(s)), "text": getattr(s, "name_mn", str(s))} for s in qs]
+        return JsonResponse({"results": results})
+
+    def map_view(self, request: HttpRequest):
+        """Бүх байршлыг газрын зураг дээр харах"""
+        qs = self.get_queryset(request)
+        ctx = dict(
+            self.admin_site.each_context(request),
+            title="Станцуудын байршил (Газрын зураг)",
+            locations_json=json.dumps(self._build_locations_payload(qs), ensure_ascii=False),
+        )
+        return render(request, "inventory/location_map.html", ctx)
+
+    def map_one_view(self, request: HttpRequest, location_id: int):
+        """Тухайн нэг байршлыг газрын зураг дээр фокуслаж харах"""
+        qs = self.get_queryset(request).filter(id=location_id)
+        ctx = dict(
+            self.admin_site.each_context(request),
+            title="Байршил (Газрын зураг)",
+            locations_json=json.dumps(self._build_locations_payload(qs), ensure_ascii=False),
+            focus_id=location_id,
+        )
+        return render(request, "inventory/location_map.html", ctx)
+
         return custom + urls
 
     def sums_by_aimag_view(self, request: HttpRequest):
@@ -939,21 +962,38 @@ class InventoryAdminSite(AdminSite):
     index_title = "Удирдлага"
 
     def get_urls(self):
+        # ✅ Lazy import хийж circular import-оос сэргийлэв
+        from .reports_hub_compat import (
+            reports_hub_view,
+            reports_chart_json,
+            reports_sums_by_aimag,
+            reports_table_json,
+            reports_export_devices_csv,
+            reports_export_locations_csv,
+            reports_export_maintenance_csv,
+            reports_export_control_csv,
+            reports_export_movements_csv,
+            reports_export_spareparts_csv,
+            reports_export_auth_audit_csv,
+            reports_export_csv,
+        )
+
         urls = super().get_urls()
 
         custom = [
-            # ReportsHub UI
+            # 📊 ReportsHub UI & API
             path("reports/", self.admin_view(reports_hub_view), name="reports-hub"),
             path("reports/chart.json/", self.admin_view(reports_chart_json), name="reports-chart-json"),
             path("reports/sums.json/", self.admin_view(reports_sums_by_aimag), name="reports-sums-json"),
+            path("reports/table.json", self.admin_view(reports_table_json), name="reports-table-json"),
 
-            # WORKFLOW (admin-only)
+            # ⚙️ WORKFLOW (Admin-only)
             path("inventory/workflow/pending/", self.admin_view(wf.workflow_pending_dashboard), name="workflow_pending_dashboard"),
             path("inventory/workflow/pending-counts/", self.admin_view(wf.workflow_pending_counts), name="workflow_pending_counts"),
             path("inventory/workflow/review/", self.admin_view(wf.workflow_review_action), name="workflow_review_action"),
             path("inventory/workflow/audit/", self.admin_view(wf.workflow_audit_log), name="workflow_audit_log"),
 
-            # Exports
+            # 📥 Exports (CSV)
             path("reports/export/devices.csv", self.admin_view(reports_export_devices_csv), name="reports-export-devices-csv"),
             path("reports/export/locations.csv", self.admin_view(reports_export_locations_csv), name="reports-export-locations-csv"),
             path("reports/export/maintenance.csv", self.admin_view(reports_export_maintenance_csv), name="reports-export-maintenance-csv"),
