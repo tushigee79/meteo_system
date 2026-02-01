@@ -283,9 +283,11 @@
     cWf = echarts.init(document.getElementById('chart_workflow'));
 
     loadSums($('#id_aimag').val(), "{{ filter.sum }}");
-    $('#id_aimag').on('change', function(){ loadSums($(this).val(), ""); });
+    $('#id_aimag').on('change', function(){ loadSums($(this).val(), ""); refreshCharts(); });
 
-    $('#id_metric').on('change', function(){ document.getElementById("rhForm").submit(); });
+    $('#id_metric').on('change', function(){ refreshCharts(); });
+    $('#id_report, #id_kind, #id_status, #id_location_type, #id_sum').on('change', function(){ refreshCharts(); });
+    $('#id_date_from, #id_date_to').on('change', function(){ refreshCharts(); });
 
     refreshCharts();
 
