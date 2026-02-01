@@ -5,604 +5,282 @@
 
 {% block extrahead %}
 {{ block.super }}
-<link rel="stylesheet" href="{% static 'inventory/vendor/leaflet/leaflet.css' %}">
-<script src="{% static 'inventory/vendor/leaflet/leaflet.js' %}"></script>
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 
 <style>
-/* Pulse for Leaflet SVG paths */
-.leaflet-interactive.pending-pulse {
-  animation: pulseStroke 1.2s ease-in-out infinite;
-}
-@keyframes pulseStroke {
-  0%   { stroke-width: 2; opacity: 1; }
-  50%  { stroke-width: 6; opacity: .65; }
-  100% { stroke-width: 2; opacity: 1; }
-}
+    /* =========================================
+       1. Django Admin & Jazzmin Layout FIX
+       (Sidebar-тай давхцуулахгүйгээр дэлгэц дүүргэх)
+       ========================================= */
+    
+    /* Үндсэн контейнерын өргөний хязгаарлалтыг авах */
+    .container, .container-fluid {
+        max-width: 100% !important;
+        width: 100% !important;
+        padding-left: 15px !important;
+        padding-right: 15px !important;
+    }
 
-.map-legend{
-  background:#fff;
-  border:1px solid rgba(0,0,0,.12);
-  border-radius:12px;
-  padding:10px 12px;
-  font-size:12px;
-  line-height:1.35;
-  box-shadow: 0 8px 20px rgba(0,0,0,.08);
-}
-.map-legend label{ cursor:pointer; user-select:none; }
-.legend-dot{
-  display:inline-block;
-  width:10px;height:10px;
-  border-radius:999px;
-  margin-right:6px;
-  vertical-align:middle;
-  border:1px solid rgba(0,0,0,.15);
-}
-.legend-row{ margin:2px 0; }
+    /* Jazzmin-ийн үндсэн content хэсгийг сунгах, 
+       гэхдээ margin-г нь 0 болгож БОЛОХГҮЙ (Sidebar-д зай хэрэгтэй) */
+    #content-main {
+        width: 100% !important;
+        max-width: 100% !important;
+        float: none !important;
+    }
 
-/* Minimal admin-ish form styling */
-.dg-filters{
-  display:flex;
-  flex-wrap:wrap;
-  gap:8px;
-  align-items:center;
-  margin-bottom:12px;
-}
-.dg-filters input[type="date"], .dg-filters select{
-  padding:6px 8px;
-  border:1px solid rgba(0,0,0,.2);
-  border-radius:8px;
-}
-.dg-btn{
-  padding:6px 10px;
-  border-radius:10px;
-  border:1px solid rgba(0,0,0,.18);
-  background:#fff;
-  cursor:pointer;
-}
-.dg-btn[disabled]{ opacity:.55; cursor:not-allowed; }
+    /* =========================================
+       2. Dashboard Custom Styles
+       ========================================= */
+    .dg-container { 
+        padding: 20px; 
+        background-color: #f4f6f9; 
+        min-height: 100vh; 
+        width: 100%;
+        box-sizing: border-box;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
+    }
+    
+    .dg-grid { 
+        display: grid; 
+        grid-template-columns: 1fr 1fr; /* 50% / 50% багана */
+        gap: 20px; 
+        margin-top: 20px; 
+        width: 100%;
+    }
 
-.dg-grid{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:12px;
-  align-items:stretch;
-}
-.dg-card{
-  border:1px solid rgba(0,0,0,.12);
-  border-radius:12px;
-  padding:10px;
-  background:#fff;
-}
-.dg-title{
-  font-weight:900;
-  margin:0 0 8px 0;
-  font-size:14px;
-}
-.dg-hint{
-  font-size:12px;
-  opacity:.75;
-  margin-top:6px;
-}
+    /* Газрын зургийг доор нь бүтэн уртаар сунгах */
+    .full-width { 
+        grid-column: 1 / -1; 
+    }
+
+    .dg-card { 
+        background: #fff; 
+        padding: 20px; 
+        border-radius: 8px; 
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05); 
+        border: 1px solid #e0e0e0;
+        width: 100%; 
+        box-sizing: border-box; 
+    }
+
+    .dg-title { 
+        font-weight: bold; 
+        font-size: 16px;
+        margin-bottom: 15px; 
+        border-bottom: 1px solid #eee; 
+        padding-bottom: 10px; 
+        color: #333;
+    }
+
+    .dg-filters { 
+        display: flex; 
+        gap: 15px; 
+        background: #fff; 
+        padding: 15px; 
+        border-radius: 8px; 
+        margin-bottom: 20px; 
+        align-items: center; 
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .dg-btn { 
+        background: #447e9b; 
+        color: white; 
+        border: none; 
+        padding: 8px 15px; 
+        border-radius: 4px; 
+        cursor: pointer; 
+    }
+    .dg-btn:hover { background: #35657b; }
+    
+    /* Map Legend */
+    .map-legend { background: rgba(255,255,255,0.95); padding: 10px; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.2); font-size: 12px; }
+    .legend-row { margin-bottom: 5px; display: flex; align-items: center; cursor: pointer; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; border: 1px solid #666; }
+    .pulse-marker { animation: pulse 2s infinite; }
+    @keyframes pulse { 0% { opacity: 1; stroke-width: 0; } 50% { opacity: 0.5; stroke-width: 10px; } 100% { opacity: 0; stroke-width: 0; } }
+
+    /* Жижиг дэлгэц дээр (Гар утас) автоматаар 1 багана болгох */
+    @media (max-width: 1000px) {
+        .dg-grid {
+            grid-template-columns: 1fr;
+        }
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<h1>Dashboard – Graph + Map</h1>
+<div class="dg-container">
+    <h1 style="margin-top:0; margin-bottom:20px;">Хянах Самбар (Dashboard)</h1>
 
-<form id="filterForm" class="dg-filters" method="get">
-  <input type="date" name="date_from" value="{{ filter_date_from }}">
-  <input type="date" name="date_to" value="{{ filter_date_to }}">
+    <form class="dg-filters" method="get">
+        <label>Огноо:</label>
+        <input type="date" name="date_from" value="{{ filter_date_from }}" style="padding: 5px; border:1px solid #ccc; border-radius:4px;"> - 
+        <input type="date" name="date_to" value="{{ filter_date_to }}" style="padding: 5px; border:1px solid #ccc; border-radius:4px;">
+        
+        <select name="status" style="padding: 5px; border:1px solid #ccc; border-radius:4px;">
+            <option value="">-- Бүх Төлөв --</option>
+            <option value="Active" {% if filter_status == 'Active' %}selected{% endif %}>Active</option>
+            <option value="Broken" {% if filter_status == 'Broken' %}selected{% endif %}>Broken</option>
+            <option value="Repair" {% if filter_status == 'Repair' %}selected{% endif %}>Repair</option>
+            <option value="Stored" {% if filter_status == 'Stored' %}selected{% endif %}>Stored</option>
+        </select>
 
-  <select name="status">
-    <option value="">Status (all)</option>
-    {% for v,l in status_choices %}
-      <option value="{{ v }}" {% if filter_status == v %}selected{% endif %}>{{ l }}</option>
-    {% endfor %}
-  </select>
+        <button type="submit" class="dg-btn">Шүүх</button>
+        <a href="?" class="dg-btn" style="background:#888; text-decoration:none;">Reset</a>
+    </form>
 
-  <select name="kind">
-    <option value="">Kind (all)</option>
-    {% for v,l in kind_choices %}
-      <option value="{{ v }}" {% if filter_kind == v %}selected{% endif %}>{{ l }}</option>
-    {% endfor %}
-  </select>
+    <div class="dg-grid">
+        <div class="dg-card">
+            <div class="dg-title">Төхөөрөмжийн Төлөв (Timeline)</div>
+            <div id="chart_status" style="width: 100%; height: 350px;"></div>
+        </div>
 
-  <select name="location_type">
-    <option value="">Location type (all)</option>
-    {% for v,l in location_type_choices %}
-      <option value="{{ v }}" {% if filter_location_type == v %}selected{% endif %}>{{ l }}</option>
-    {% endfor %}
-  </select>
+        <div class="dg-card">
+            <div class="dg-title">Ажлын Урсгал</div>
+            <div id="chart_workflow" style="width: 100%; height: 350px;"></div>
+        </div>
 
-  <button class="dg-btn" type="submit">Apply</button>
-  <button class="dg-btn" type="button" id="btnReset">Reset</button>
-
-  <span id="ajaxState" class="dg-hint" style="margin-left:auto;"></span>
-</form>
-
-<div class="dg-grid">
-  <div class="dg-card">
-    <div class="dg-title">Devices by Status</div>
-    <div id="chart_status" style="height:300px;"></div>
-    <div class="dg-hint">Click bar → set Status filter. Shift+click → add without clearing other filters.</div>
-  </div>
-
-  <div class="dg-card">
-    <div class="dg-title">Workflow (Maintenance vs Control)</div>
-    <div id="chart_workflow" style="height:300px;"></div>
-    <div class="dg-hint">Click point → set date range to that day (if axis is day). If axis is month/week, sets that bucket.</div>
-  </div>
-
-  <div class="dg-card" style="grid-column:1 / span 2;">
-    <div class="dg-title">Map (Pending pulse + Legend toggles + Reverse filter)</div>
-    <div id="map" style="height:420px;border-radius:12px;" style="height:420px;"></div>
-    <div class="dg-hint">
-      Click marker → filter charts by that marker's type/status locally (Alt+click clears local selection).
-      Use legend to toggle markers; charts auto-recompute from visible markers.
+        <div class="dg-card full-width">
+            <div class="dg-title">Байршил</div>
+            <div id="map" style="width: 100%; height: 600px;"></div>
+        </div>
     </div>
-  </div>
 </div>
 
+<script type="application/json" id="data-status">{{ devices_by_status_json|safe }}</script>
+<script type="application/json" id="data-workflow">{{ workflow_json|safe }}</script>
+<script type="application/json" id="data-locations">{{ locations_json|safe }}</script>
+
 <script>
-/**
- * SAFE JSON defaults (prevents template render crash)
- */
-let statusSeries = {{ echarts_status_json|default:"[]"|safe }};
-let wf = {{ echarts_workflow_json|default:"{\"axis\":[],\"ms\":[],\"ca\":[]}"|safe }};
-let points = {{ locations_json|default:"[]"|safe }};
+document.addEventListener("DOMContentLoaded", function() {
+    function getJson(id) { try { return JSON.parse(document.getElementById(id).textContent); } catch(e){ return []; } }
+    
+    const statusData = getJson("data-status");
+    const wfData = getJson("data-workflow");
+    const locData = getJson("data-locations");
+    const COLORS = {'Active': '#28a745', 'Broken': '#dc3545', 'Repair': '#ffc107', 'Stored': '#6c757d'};
 
-/**
- * Color maps
- */
-const TYPE_COLORS = {
-  AWS:"#2563eb",
-  WEATHER:"#16a34a",
-  HYDRO:"#0891b2",
-  RADAR:"#9333ea",
-  AEROLOGY:"#db2777",
-  AGRO:"#65a30d",
-  ETALON:"#f97316",
-  OTHER:"#6b7280"
-};
+    // 1. Status Chart (Timeline Line Chart)
+    const stEl = document.getElementById("chart_status");
+    if(stEl) {
+        const chart = echarts.init(stEl);
+        const xAxisData = statusData.axis || [];
+        const seriesData = statusData.series || {};
 
-const STATUS_COLORS = {
-  PENDING:"#f59e0b",
-  BROKEN:"#ef4444",
-  EMPTY:"#9ca3af",
-  OK:"#22c55e"
-};
-
-/**
- * Utilities
- */
-function getQueryParams(){
-  const url = new URL(window.location.href);
-  return url.searchParams;
-}
-function setParam(key, value){
-  const url = new URL(window.location.href);
-  if (value === null || value === undefined || value === "") url.searchParams.delete(key);
-  else url.searchParams.set(key, value);
-  window.history.replaceState({}, "", url.toString());
-  return url;
-}
-function buildUrlWith(paramsObj){
-  const url = new URL(window.location.href);
-  Object.keys(paramsObj).forEach(k => {
-    const v = paramsObj[k];
-    if (v === null || v === undefined || v === "") url.searchParams.delete(k);
-    else url.searchParams.set(k, v);
-  });
-  return url.toString();
-}
-function serializeForm(form){
-  const fd = new FormData(form);
-  const obj = {};
-  for (const [k,v] of fd.entries()){
-    if (v !== "") obj[k] = v;
-  }
-  return obj;
-}
-function setAjaxState(msg){
-  const el = document.getElementById("ajaxState");
-  if (!el) return;
-  el.textContent = msg || "";
-}
-
-/**
- * ECharts
- */
-const chartStatus = echarts.init(document.getElementById("chart_status"));
-const chartWf = echarts.init(document.getElementById("chart_workflow"));
-
-function normalizeStatusSeries(arr){
-  // Accept either [{status,count}] or [{name,value}] shapes
-  return (arr || []).map(x => {
-    if (typeof x === "object" && x){
-      if ("status" in x) return { status: String(x.status || ""), count: Number(x.count || 0) };
-      if ("name" in x) return { status: String(x.name || ""), count: Number(x.value || 0) };
+        chart.setOption({
+            tooltip: { trigger: 'axis' },
+            legend: { data: ['Active', 'Broken', 'Repair', 'Stored'], bottom: 0 },
+            grid: { left: '3%', right: '4%', bottom: '10%', containLabel: true },
+            xAxis: { 
+                type: 'category', 
+                data: xAxisData, 
+                boundaryGap: false 
+            },
+            yAxis: { type: 'value' },
+            series: [
+                {
+                    name: 'Active', type: 'line', smooth: true, symbol: 'none',
+                    data: seriesData.Active || [], itemStyle: { color: COLORS.Active }, lineStyle: {width: 3}
+                },
+                {
+                    name: 'Broken', type: 'line', smooth: true, symbol: 'none',
+                    data: seriesData.Broken || [], itemStyle: { color: COLORS.Broken }, lineStyle: {width: 3}
+                },
+                {
+                    name: 'Repair', type: 'line', smooth: true, symbol: 'none',
+                    data: seriesData.Repair || [], itemStyle: { color: COLORS.Repair }, lineStyle: {width: 3}
+                },
+                {
+                    name: 'Stored', type: 'line', smooth: true, symbol: 'none',
+                    data: seriesData.Stored || [], itemStyle: { color: COLORS.Stored }, lineStyle: {width: 3}
+                }
+            ]
+        });
+        window.addEventListener('resize', ()=>chart.resize());
     }
-    return { status: String(x), count: 0 };
-  });
-}
 
-function renderStatusChart(series){
-  const s = normalizeStatusSeries(series);
-  chartStatus.setOption({
-    tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: s.map(x => x.status), axisLabel: { rotate: 18 } },
-    yAxis: { type: 'value' },
-    series: [{
-      type: 'bar',
-      data: s.map(x => x.count),
-      emphasis: { focus: 'series' }
-    }]
-  }, true);
-}
-
-function renderWorkflowChart(wfData){
-  const axis = (wfData && wfData.axis) ? wfData.axis : [];
-  const ms = (wfData && wfData.ms) ? wfData.ms : [];
-  const ca = (wfData && wfData.ca) ? wfData.ca : [];
-
-  chartWf.setOption({
-    tooltip: { trigger: 'axis' },
-    legend: { data: ["Maintenance", "Control"] },
-    xAxis: { type: 'category', data: axis, axisLabel: { rotate: 18 } },
-    yAxis: { type: 'value' },
-    series: [
-      { name: "Maintenance", type: 'line', data: ms, smooth: true, symbolSize: 6 },
-      { name: "Control", type: 'line', data: ca, smooth: true, symbolSize: 6 },
-    ]
-  }, true);
-}
-
-/**
- * AJAX reload contract (enterprise)
- * Frontend expects backend to support:
- *   - same URL with ?ajax=1 returns JSON:
- *     { echarts_status: [...], echarts_workflow:{axis:[],ms:[],ca:[]}, locations:[...] }
- *
- * If backend doesn't support it yet, page still works via full reload (normal submit).
- */
-async function ajaxReload(paramsObj){
-  const url = new URL(window.location.href);
-  Object.keys(paramsObj || {}).forEach(k => {
-    const v = paramsObj[k];
-    if (v === null || v === undefined || v === "") url.searchParams.delete(k);
-    else url.searchParams.set(k, v);
-  });
-  url.searchParams.set("ajax", "1");
-
-  setAjaxState("Loading…");
-  try{
-    const res = await fetch(url.toString(), {
-      headers: {
-        "X-Requested-With": "XMLHttpRequest",
-        "Accept": "application/json"
-      },
-      credentials: "same-origin"
-    });
-
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const data = await res.json();
-
-    // Update data
-    statusSeries = data.echarts_status || data.statusSeries || [];
-    wf = data.echarts_workflow || data.wf || {axis:[],ms:[],ca:[]};
-    points = data.locations || data.points || [];
-
-    // Re-render all
-    renderAll();
-
-    // Update URL (clean, without ajax=1)
-    const cleanUrl = buildUrlWith(paramsObj || {});
-    window.history.replaceState({}, "", cleanUrl);
-
-    setAjaxState("Updated");
-    setTimeout(() => setAjaxState(""), 800);
-  }catch(err){
-    // Fallback: full reload if AJAX not supported
-    console.warn("AJAX reload failed; falling back to full reload.", err);
-    setAjaxState("Reloading…");
-    window.location.href = buildUrlWith(paramsObj || {});
-  }
-}
-
-/**
- * Map + legend toggles + reverse filter
- */
-const map = L.map('map').setView([47.9, 106.9], 5);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
-
-const markers = []; // {p, m}
-let localSelection = null; // { type?, status? } optional local reverse-filter
-
-function markerStatusBucket(p){
-  const pt = Number(p.pending_total || 0);
-  if (pt > 0) return "PENDING";
-  const st = String(p.status || "").toUpperCase();
-  if (st === "BROKEN") return "BROKEN";
-  if (st === "EMPTY") return "EMPTY";
-  return "OK";
-}
-
-function shouldShow(p, state){
-  const t = p.type || "OTHER";
-  if (!state.types[t]) return false;
-
-  const bucket = markerStatusBucket(p);
-  if (!state.statuses[bucket]) return false;
-
-  // local reverse-filter selection (applies to charts ONLY; markers can still show/hide by legend)
-  return true;
-}
-
-const typeSet = {};
-(points || []).forEach(p => { typeSet[p.type || "OTHER"] = true; });
-
-const state = {
-  types: {...typeSet},
-  statuses: { PENDING:true, BROKEN:true, EMPTY:true, OK:true }
-};
-
-function buildMarker(p){
-  const t = p.type || "OTHER";
-  const c = TYPE_COLORS[t] || TYPE_COLORS.OTHER;
-  const isPending = Number(p.pending_total || 0) > 0;
-
-  const m = L.circleMarker([p.lat, p.lon], {
-    radius: 7,
-    weight: isPending ? 3 : 2,
-    color: "rgba(0,0,0,.35)",
-    fillColor: c,
-    fillOpacity: 0.95,
-    className: isPending ? "pending-pulse" : ""
-  });
-
-  m.bindPopup(`<b>${p.name||""}</b><br>Status: ${p.status||""}<br>Pending: ${p.pending_total||0}<br>Type: ${t}`);
-
-  // Reverse-filter: click marker affects charts (client-side); Alt+click clears
-  m.on("click", (ev) => {
-    const alt = ev.originalEvent && ev.originalEvent.altKey;
-    if (alt){
-      localSelection = null;
-      renderChartsFromVisibleMarkers();
-      return;
+    // 2. Workflow Chart
+    const wfEl = document.getElementById("chart_workflow");
+    if(wfEl && wfData.axis) {
+        const chart = echarts.init(wfEl);
+        chart.setOption({
+            tooltip: { trigger: 'axis' },
+            legend: { data: ['Maintenance', 'Control'] },
+            grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+            xAxis: { type: 'category', boundaryGap: false, data: wfData.axis },
+            yAxis: { type: 'value' },
+            series: [
+                { name: 'Maintenance', type: 'line', smooth: true, data: wfData.ms, itemStyle:{color:'#007bff'} },
+                { name: 'Control', type: 'line', smooth: true, data: wfData.ca, itemStyle:{color:'#6610f2'} }
+            ]
+        });
+        window.addEventListener('resize', ()=>chart.resize());
     }
-    localSelection = { type: t, bucket: markerStatusBucket(p) };
-    renderChartsFromVisibleMarkers();
-  });
 
-  return m;
-}
+    // 3. Map
+    const mapEl = document.getElementById("map");
+    if(mapEl) {
+        const map = L.map('map').setView([47.9, 106.9], 5);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OSM' }).addTo(map);
 
-function rebuildMarkers(){
-  // clear existing
-  markers.forEach(x => { try{ map.removeLayer(x.m); }catch(e){} });
-  markers.length = 0;
+        const allMarkers = [];
+        locData.forEach(p => {
+            if(p.lat != null && p.lon != null) {
+                const st = p.status || 'Active';
+                const col = COLORS[st] || 'blue';
+                const cls = (st==='Broken'||st==='Repair') ? 'pulse-marker' : '';
+                
+                const m = L.circleMarker([p.lat, p.lon], {
+                    radius: 8, fillColor: col, color: '#333', weight: 1, fillOpacity: 0.9, className: cls
+                }).bindPopup(`<b>${p.name}</b><br>${st}`);
+                
+                m.data = {status: st};
+                m.addTo(map);
+                allMarkers.push(m);
+            }
+        });
 
-  // rebuild sets
-  Object.keys(state.types).forEach(k => delete state.types[k]);
-  Object.keys(typeSet).forEach(k => delete typeSet[k]);
-  (points || []).forEach(p => { typeSet[p.type || "OTHER"] = true; });
-  Object.keys(typeSet).forEach(k => state.types[k] = true);
+        if(allMarkers.length > 0) {
+            const group = L.featureGroup(allMarkers);
+            map.fitBounds(group.getBounds(), {padding: [50,50]});
+        }
 
-  (points || []).forEach(p => {
-    if (!p || p.lat === undefined || p.lon === undefined) return;
-    const m = buildMarker(p);
-    // add based on legend state
-    const show = shouldShow(p, state);
-    if (show) m.addTo(map);
-    markers.push({p, m});
-  });
-}
+        // Legend
+        const legend = L.control({position: 'topright'});
+        legend.onAdd = function() {
+            const div = L.DomUtil.create('div', 'map-legend');
+            let html = '<strong>Statuses</strong><br>';
+            ['Active', 'Broken', 'Repair', 'Stored'].forEach(st => {
+                html += `<div class="legend-row">
+                    <input type="checkbox" checked class="filter-cb" value="${st}">
+                    <span class="legend-dot" style="background:${COLORS[st]}"></span> ${st}
+                </div>`;
+            });
+            div.innerHTML = html;
+            L.DomEvent.disableClickPropagation(div);
+            return div;
+        };
+        legend.addTo(map);
 
-function refreshMarkers(){
-  markers.forEach(x => {
-    const show = shouldShow(x.p, state);
-    if (show) x.m.addTo(map);
-    else map.removeLayer(x.m);
-  });
-}
-
-/**
- * Legend (synced colors)
- */
-const legend = L.control({position: 'topright'});
-legend.onAdd = function(){
-  const div = L.DomUtil.create('div', 'map-legend');
-  div.innerHTML = `
-    <div style="font-weight:900;margin-bottom:6px;">Legend</div>
-
-    <div style="font-weight:800;margin-bottom:6px;">Statuses</div>
-    <div style="margin-bottom:8px;">
-      <div class="legend-row"><label><input type="checkbox" data-st="PENDING" checked>
-        <span class="legend-dot" style="background:${STATUS_COLORS.PENDING};"></span> Pending</label></div>
-      <div class="legend-row"><label><input type="checkbox" data-st="BROKEN" checked>
-        <span class="legend-dot" style="background:${STATUS_COLORS.BROKEN};"></span> Broken</label></div>
-      <div class="legend-row"><label><input type="checkbox" data-st="EMPTY" checked>
-        <span class="legend-dot" style="background:${STATUS_COLORS.EMPTY};"></span> Empty</label></div>
-      <div class="legend-row"><label><input type="checkbox" data-st="OK" checked>
-        <span class="legend-dot" style="background:${STATUS_COLORS.OK};"></span> OK</label></div>
-    </div>
-
-    <div style="font-weight:800;margin-bottom:6px;">Types</div>
-    <div id="typeBox"></div>
-
-    <div style="margin-top:8px;border-top:1px solid rgba(0,0,0,.08);padding-top:8px;">
-      <button type="button" class="dg-btn" id="btnClearLocal" style="width:100%;">Clear local selection</button>
-    </div>
-  `;
-  return div;
-};
-legend.addTo(map);
-
-function setupLegendHandlers(){
-  const typeBox = document.getElementById("typeBox");
-  if (!typeBox) return;
-  typeBox.innerHTML = "";
-
-  Object.keys(typeSet).sort().forEach(t => {
-    const color = TYPE_COLORS[t] || TYPE_COLORS.OTHER;
-    const row = document.createElement("div");
-    row.className = "legend-row";
-    row.innerHTML = `<label><input type="checkbox" data-type="${t}" checked>
-      <span class="legend-dot" style="background:${color};"></span> ${t}</label>`;
-    typeBox.appendChild(row);
-  });
-
-  document.querySelectorAll(".map-legend input").forEach(inp => {
-    L.DomEvent.disableClickPropagation(inp);
-    inp.addEventListener("change", (e) => {
-      const el = e.target;
-      const st = el.getAttribute("data-st");
-      const ty = el.getAttribute("data-type");
-      if (st) state.statuses[st] = el.checked;
-      if (ty) state.types[ty] = el.checked;
-      refreshMarkers();
-      renderChartsFromVisibleMarkers(); // charts auto-sync with visible markers
-    });
-  });
-
-  const btnClearLocal = document.getElementById("btnClearLocal");
-  if (btnClearLocal){
-    L.DomEvent.disableClickPropagation(btnClearLocal);
-    btnClearLocal.addEventListener("click", () => {
-      localSelection = null;
-      renderChartsFromVisibleMarkers();
-    });
-  }
-}
-
-/**
- * Reverse filter charts from currently visible markers (+ optional local selection)
- */
-function getVisiblePoints(){
-  // A marker is "visible" if its layer is currently on map (based on legend filters)
-  const visible = [];
-  markers.forEach(x => {
-    if (map.hasLayer(x.m)) visible.push(x.p);
-  });
-  return visible;
-}
-
-function renderChartsFromVisibleMarkers(){
-  const vis = getVisiblePoints();
-
-  // If local selection active, restrict chart aggregation to that slice
-  const filtered = (!localSelection) ? vis : vis.filter(p => {
-    const t = p.type || "OTHER";
-    const bucket = markerStatusBucket(p);
-    return (localSelection.type ? t === localSelection.type : true) &&
-           (localSelection.bucket ? bucket === localSelection.bucket : true);
-  });
-
-  // Status chart aggregation
-  const bucketCounts = { PENDING:0, BROKEN:0, EMPTY:0, OK:0 };
-  filtered.forEach(p => bucketCounts[markerStatusBucket(p)] = (bucketCounts[markerStatusBucket(p)] || 0) + 1);
-  const s = Object.keys(bucketCounts).map(k => ({ status: k, count: bucketCounts[k] }));
-  renderStatusChart(s);
-
-  // Workflow chart: keep backend wf by default; but if markers filtered, we don't have per-point wf history in client.
-  // So we keep wf chart as-is, but we show selection hint by changing subtitle.
-  renderWorkflowChart(wf);
-
-  // Small hint
-  const hint = document.getElementById("ajaxState");
-  if (hint && localSelection){
-    hint.textContent = `Local filter: type=${localSelection.type}, status=${localSelection.bucket}`;
-  }else if (hint && hint.textContent.startsWith("Local filter")){
-    hint.textContent = "";
-  }
-}
-
-/**
- * Render all (initial or after AJAX)
- */
-function renderAll(){
-  // charts from backend series first (baseline)
-  renderStatusChart(statusSeries);
-  renderWorkflowChart(wf);
-
-  // map
-  rebuildMarkers();
-  setupLegendHandlers();
-  renderChartsFromVisibleMarkers(); // sync charts with visible markers (legend defaults to all)
-}
-
-/**
- * Chart click -> multi-filter (enterprise)
- * - Status bar click sets status filter (and keeps other form filters)
- * - Shift+click toggles the value in URL (if already set, clears it)
- */
-chartStatus.on('click', function(params){
-  const form = document.getElementById("filterForm");
-  const base = serializeForm(form);
-  const name = params.name;
-
-  const shift = params.event && params.event.event && params.event.event.shiftKey;
-
-  if (shift){
-    base.status = (base.status === name) ? "" : name;
-  }else{
-    base.status = name;
-  }
-
-  ajaxReload(base);
-});
-
-/**
- * Workflow chart click:
- * Sets a bucket in URL as date_from/date_to if backend expects exact day.
- * If your backend uses axis buckets, map that key to your server logic.
- */
-chartWf.on('click', function(params){
-  const form = document.getElementById("filterForm");
-  const base = serializeForm(form);
-  const key = params.name; // category label
-
-  // Enterprise default behavior: set date_from = date_to = key if it looks like YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(key)){
-    base.date_from = key;
-    base.date_to = key;
-  }else{
-    // fallback: store a bucket value (optional). If server doesn't use it, harmless.
-    base.bucket = key;
-  }
-
-  ajaxReload(base);
-});
-
-/**
- * Filter form AJAX submit
- */
-const form = document.getElementById("filterForm");
-form.addEventListener("submit", (e) => {
-  e.preventDefault();
-  const base = serializeForm(form);
-  ajaxReload(base);
-});
-
-/**
- * Reset filters
- */
-document.getElementById("btnReset").addEventListener("click", () => {
-  ajaxReload({});
-});
-
-/**
- * Initial render
- */
-renderAll();
-
-/**
- * Resize charts on window resize
- */
-window.addEventListener("resize", () => {
-  chartStatus.resize();
-  chartWf.resize();
+        document.querySelector('.map-legend').addEventListener('change', function(e) {
+            if(e.target.classList.contains('filter-cb')) {
+                const checked = Array.from(document.querySelectorAll('.filter-cb:checked')).map(c=>c.value);
+                allMarkers.forEach(m => {
+                    if(checked.includes(m.data.status)) {
+                        if(!map.hasLayer(m)) map.addLayer(m);
+                    } else {
+                        if(map.hasLayer(m)) map.removeLayer(m);
+                    }
+                });
+            }
+        });
+    }
 });
 </script>
 {% endblock %}

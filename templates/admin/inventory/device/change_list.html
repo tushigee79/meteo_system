@@ -16,27 +16,28 @@
   {{ block.super }}
 {% endblock %}
 
-{# Хэрвээ чи өөрийн custom filter bar хийсэн бол энэ хэсэгт байрладаг. #}
 {% block search %}
-  {{ block.super }}
-
-  <div style="margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+  {# АЛДАА ЗАСАВ: {{ block.super }}-ийг хассан (давхар хайлт үүсгэхгүйн тулд) #}
+  
+  <div style="margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 6px; background-color: #f9f9f9;">
     <form id="dev-filter-form" method="get" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-      {# Preserve existing GET params except our controls #}
+      
+      {# Бусад идэвхтэй шүүлтүүрүүдийг хадгалах #}
       {% for key, value in request.GET.items %}
         {% if key != "kind" and key != "q" %}
           <input type="hidden" name="{{ key }}" value="{{ value }}">
         {% endif %}
       {% endfor %}
 
-      <label for="filter_kind" style="font-weight:600;">Төрөл:</label>
-      <select id="filter_kind" name="kind" style="min-width:200px;">
+      <label for="filter_kind" style="font-weight:600; color:#333;">Төрөл:</label>
+      <select id="filter_kind" name="kind" style="min-width:200px; padding: 5px; border:1px solid #ccc; border-radius:4px;">
         <option value="">---------</option>
         {% if KIND_CHOICES %}
           {% for val, label in KIND_CHOICES %}
             <option value="{{ val }}" {% if request.GET.kind == val %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         {% else %}
+          {# Хэрэв KIND_CHOICES ирэхгүй бол эдгээрийг харуулна #}
           <option value="WEATHER" {% if request.GET.kind == "WEATHER" %}selected{% endif %}>Цаг уур</option>
           <option value="HYDRO" {% if request.GET.kind == "HYDRO" %}selected{% endif %}>Ус судлал</option>
           <option value="AWS" {% if request.GET.kind == "AWS" %}selected{% endif %}>AWS</option>
@@ -48,10 +49,10 @@
         {% endif %}
       </select>
 
-      <input type="search" name="q" placeholder="Хайх..." value="{{ request.GET.q|default_if_none:'' }}" style="min-width:220px; padding:6px 8px;">
+      <input type="search" name="q" placeholder="Хайх..." value="{{ request.GET.q|default_if_none:'' }}" style="min-width:220px; padding:6px 8px; border:1px solid #ccc; border-radius:4px;">
 
-      <button type="submit" class="button">Шүүх</button>
-      <a class="button" href="." style="text-decoration:none;">Reset</a>
+      <button type="submit" class="button" style="background:#447e9b; color:white; border:none; border-radius:4px; padding:6px 12px; cursor:pointer;">Шүүх</button>
+      <a class="button" href="." style="text-decoration:none; background:#999; color:white; border-radius:4px; padding:6px 12px;">Reset</a>
     </form>
   </div>
 
@@ -59,6 +60,7 @@
     (function () {
       const el = document.getElementById("filter_kind");
       const form = document.getElementById("dev-filter-form");
+      // Сонголт хийхэд шууд хайх
       if (el && form) el.addEventListener("change", function(){ form.submit(); });
     })();
   </script>
