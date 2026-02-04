@@ -54,6 +54,12 @@ class InstrumentCatalog(models.Model):
     is_active = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
 
+    verification_cycle_months = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Шалгалт/калибровкийн цикл (сар)",
+        help_text="0 бол автоматаар тооцохгүй (manual). Ж: 12 = жил бүр."
+    )
+
     class Meta:
         verbose_name = "ДЦУБ Каталог"
         verbose_name_plural = "ДЦУБ Каталог"
@@ -129,6 +135,10 @@ class Location(models.Model):
         ("OTHER", "Бусад"),
     ]
 
+
+    # Backward-compat aliases used by dashboards/filters
+    LOCATION_TYPE_CHOICES = LOCATION_TYPES
+    TYPE_CHOICES = LOCATION_TYPES
     name = models.CharField(max_length=255, verbose_name="Нэр")
 
     location_type = models.CharField(
@@ -192,6 +202,9 @@ class Device(models.Model):
         AGRO = "AGRO", "Хөдөө аж ахуй"
         OTHER = "OTHER", "Бусад"
 
+    # Backward-compat: some dashboards expect KIND_CHOICES
+    KIND_CHOICES = Kind.choices
+
     STATUS_CHOICES = [
         ("Active", "Ашиглагдаж буй"),
         ("Broken", "Эвдрэлтэй"),
@@ -201,6 +214,9 @@ class Device(models.Model):
     ]
 
     serial_number = models.CharField(max_length=100, unique=True, verbose_name="Серийн дугаар")
+    inventory_code = models.CharField(max_length=100, blank=True, null=True, verbose_name="Бараа материалын код")
+    manufacturer = models.CharField(max_length=100, blank=True, null=True, verbose_name="Үйлдвэрлэгч")
+    commissioned_date = models.DateField(blank=True, null=True, verbose_name="Ашиглалтад орсон огноо")
 
     # QR token (used for QR lookup/public page)
     qr_token = models.UUIDField(
@@ -227,6 +243,44 @@ class Device(models.Model):
         verbose_name="Төрөл",
     )
 
+    
+    def save(self, *args, **kwargs):
+        # 1. Хэрэв QR зураг байхгүй бол шинээр үүсгэнэ
+        if not self.qr_image:
+            # QR кодын тохиргоо
+            qr = qrcode.QRCode(
+                version=1,
+                error_correction=qrcode.constants.ERROR_CORRECT_L,
+                box_size=10,
+                border=4,
+            )
+            
+            # QR дотор хадгалах өгөгдөл (Public URL)
+            # Жишээ нь: https://meteo.gov.mn/qr/public/TOKEN/
+            # Одоогоор зөвхөн token-оо хийж турших эсвэл домайнаа хатуу бичиж болно
+            qr_data = f"/qr/public/{self.qr_token}/" 
+            qr.add_data(qr_data)
+            qr.make(fit=True)
+
+            # Зураг болгох
+            img = qr.make_image(fill_color="black", back_color="white")
+
+            # Санах ой руу хадгалах (Buffer)
+            buffer = BytesIO()
+            img.save(buffer, format="PNG")
+            
+            # Файлын нэр өгөх (qr_сериал.png)
+            filename = f"qr_{self.serial_number}.png"
+            
+            # ImageField-д хадгалах (save=False нь дахин loop-д орохоос сэргийлнэ)
+            self.qr_image.save(filename, ContentFile(buffer.getvalue()), save=False)
+
+        # 2. Үндсэн хадгалах үйлдлийг дуудах
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.name} ({self.serial_number})"
+
     catalog_item = models.ForeignKey(
         InstrumentCatalog,
         on_delete=models.PROTECT,
@@ -251,6 +305,22 @@ class Device(models.Model):
     installation_date = models.DateField(null=True, blank=True, verbose_name="Суурилуулсан")
     lifespan_years = models.PositiveIntegerField(default=10, verbose_name="Ашиглалтын хугацаа (жил)")
 
+
+    # ============================================================
+    # Calibration / Verification tracking
+    # ============================================================
+    last_verification_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="Сүүлд шалгасан/калибровка",
+    )
+    next_verification_date = models.DateField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="Дараагийн шалгалтын огноо",
+    )
+
     def clean(self):
         super().clean()
 
@@ -262,28 +332,83 @@ class Device(models.Model):
         if self.kind == self.Kind.OTHER and not (self.other_name or "").strip():
             raise ValidationError({"other_name": "“Бусад” сонгосон бол нэр заавал бөглөнө."})
 
+    def compute_next_verification_date(self):
+        """Auto-calc next_verification_date using catalog_item.verification_cycle_months."""
+        if not self.last_verification_date:
+            return None
+
+        months = 0
+        try:
+            months = int(getattr(self.catalog_item, "verification_cycle_months", 0) or 0)
+        except Exception:
+            months = 0
+
+        if months <= 0:
+            return None
+
+        try:
+            from dateutil.relativedelta import relativedelta  # type: ignore
+            return self.last_verification_date + relativedelta(months=+months)
+        except Exception:
+            # fallback: 30-day months approximation
+            return self.last_verification_date + timedelta(days=30 * months)
+
+    def verification_bucket(self, today=None):
+        """Return one of: expired / due_30 / due_90 / ok / unknown."""
+        if today is None:
+            today = timezone.localdate()
+
+        d = self.next_verification_date
+        if not d:
+            return "unknown"
+        if d < today:
+            return "expired"
+
+        delta = (d - today).days
+        if delta <= 30:
+            return "due_30"
+        if delta <= 90:
+            return "due_90"
+        return "ok"
+
     def __str__(self):
         name = self.catalog_item.name_mn if self.catalog_item else (self.other_name or "-")
         return f"{self.serial_number} - {name}"
 
     def save(self, *args, **kwargs):
-        """Save + (1) auto QR generation, (2) movement history when location changes."""
-        # track old location for movement history
+        """
+        Save + (1) auto QR generation,
+               (2) movement history when location changes,
+               (3) auto next verification date.
+        """
         old_location_id = None
 
-        # default QR expiry: 12 months (≈365 days) from creation
+        # 0) Auto-calc next verification date
+        try:
+            computed = self.compute_next_verification_date()
+            if computed:
+                self.next_verification_date = computed
+        except Exception:
+            pass
+
+        # 1) QR expiry: 12 months (≈365 days) from creation
         if not self.qr_expires_at:
             self.qr_expires_at = timezone.now() + timedelta(days=365)
 
+        # 2) Track old location (for movement history)
         if self.pk:
             try:
-                old_location_id = Device.objects.filter(pk=self.pk).values_list("location_id", flat=True).first()
+                old_location_id = (
+                    Device.objects.filter(pk=self.pk)
+                    .values_list("location_id", flat=True)
+                    .first()
+                )
             except Exception:
                 old_location_id = None
 
         super().save(*args, **kwargs)
 
-        # Write movement history if location changed
+        # 3) Write movement history if location changed
         try:
             new_location_id = self.location_id
             if self.pk and old_location_id != new_location_id:
@@ -298,7 +423,7 @@ class Device(models.Model):
         except Exception:
             pass
 
-        # Generate QR if missing
+        # 4) Generate QR if missing
         if not self.qr_image:
             try:
                 import os
@@ -306,12 +431,10 @@ class Device(models.Model):
                 from io import BytesIO
                 from django.core.files.base import ContentFile
 
-                # ensure target folder exists (MEDIA_ROOT/qr/devices)
                 target_dir = os.path.join(str(settings.MEDIA_ROOT), "qr", "devices")
                 os.makedirs(target_dir, exist_ok=True)
 
                 serial = (self.serial_number or "").strip()
-                # QR data: public URL (absolute if SITE_BASE_URL is set)
                 base = (getattr(settings, "SITE_BASE_URL", "") or "").rstrip("/")
                 path = f"/qr/public/{self.qr_token}/"
                 qr_data = (base + path) if base else path
@@ -330,6 +453,7 @@ class Device(models.Model):
     class Meta:
         verbose_name = "Хэмжих хэрэгсэл"
         verbose_name_plural = "Хэмжих хэрэгсэл"
+
 
 # ============================================================
 # ✅ Device Movement History (WMO metadata)
@@ -389,10 +513,10 @@ class DeviceMovement(models.Model):
 # ✅ WorkflowStatus helper (shared)
 # ============================================================
 class WorkflowStatus(models.TextChoices):
-    DRAFT = "DRAFT", "Draft"
-    SUBMITTED = "SUBMITTED", "Submitted"
-    APPROVED = "APPROVED", "Approved"
-    REJECTED = "REJECTED", "Rejected"
+    DRAFT = "DRAFT", "Ноорог"
+    SUBMITTED = "SUBMITTED", "Хянагдахаар илгээсэн"
+    APPROVED = "APPROVED", "Батлагдсан"
+    REJECTED = "REJECTED", "Татгалзсан"
 
 
 # ============================================================

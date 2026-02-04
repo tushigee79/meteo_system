@@ -1,0 +1,26 @@
+{# inventory/templates/admin/inventory/device/change_form.html #}
+{% extends "admin/change_form.html" %}
+{% load static i18n admin_urls %}
+
+{% block extrahead %}
+  {{ block.super }}
+  <script>
+    // Namespace: inventory_admin
+    // 1. reports-sums-by-aimag нь AdminSite-д шууд бүртгэгдсэн
+    window.__deviceSumsUrl = "{% url 'inventory_admin:reports-sums-by-aimag' %}";
+    
+    // 2. device_location_options нь DeviceAdmin-д бүртгэгдсэн тул 'апп_модель_нэр' бүтэцтэй байна
+    window.__deviceLocUrl  = "{% url 'inventory_admin:inventory_device_device_location_options' %}";
+  </script>
+{% endblock %}
+
+{% block object-tools-items %}
+  {{ block.super }}
+  {% if original and original.pk %}
+    <li>
+      <a class="historylink" href="{% url 'inventory_admin:inventory_device_passport' original.pk %}">
+        Device Passport PDF
+      </a>
+    </li>
+  {% endif %}
+{% endblock %}

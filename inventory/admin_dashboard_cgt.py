@@ -17,10 +17,11 @@ from django.http import HttpRequest, JsonResponse, HttpResponse
 from django.shortcuts import render
 from django.utils import timezone
 
+# DeviceMovement-ийг импортлов
 from .models import Device, Location, MaintenanceService, ControlAdjustment, DeviceMovement
 
 # ---------------------------------------------------------
-# 1. Helpers & Setup
+# 1. Imports Setup & Helpers
 # ---------------------------------------------------------
 try:
     from .dashboard import build_dashboard_context
@@ -36,6 +37,8 @@ try:
 except ImportError:
     build_calibration_counts = None
     build_dashboard_spec = None
+
+# --- HELPERS ---
 
 def _safe_float(v):
     if v is None or v == "": return None
@@ -68,31 +71,25 @@ def _get_str(request, key):
     val = request.GET.get(key, "").strip()
     return val if val else None
 
-def _get_int(request, key):
-    val = request.GET.get(key, "").strip()
-    if val.isdigit():
-        return int(val)
-    return None
-
 def _apply_aimag_scope(qs, request, field_name):
     """ Хэрэглэгчийн аймгаар шүүх helper """
     user = request.user
     if user.is_superuser:
         return qs
     
+    # Profile-аас аймаг авах
     prof = getattr(user, "profile", None) or getattr(user, "userprofile", None)
     if not prof:
-        return qs 
+        return qs # Эсвэл qs.none() байж болно, бодлогоос хамаарна
     
     aimag_id = getattr(prof, "aimag_id", None)
     if aimag_id:
+        # field_name__exact = aimag_id
         return qs.filter(**{field_name: aimag_id})
     
     return qs
 
-# ---------------------------------------------------------
-# 2. Chart Builders
-# ---------------------------------------------------------
+# --- CHART BUILDERS ---
 
 def _build_workflow_counts_for_range(user, devices_qs, date_from: date, date_to: date):
     ms_qs = MaintenanceService.objects.filter(device__in=devices_qs, date__gte=date_from, date__lte=date_to)
@@ -160,7 +157,7 @@ def _build_status_timeline(user, devices_qs, date_from: date, date_to: date):
 
 
 # ---------------------------------------------------------
-# 3. Main Views (Graphs & Dashboard)
+# 2. Main Views (Graphs & Dashboard)
 # ---------------------------------------------------------
 
 @staff_member_required(login_url="/django-admin/login/")
@@ -251,7 +248,7 @@ def dashboard_table_view(request: HttpRequest):
 
 
 # ---------------------------------------------------------
-# 4. Reports Table API (ReportsHub) - ШҮҮЛТҮҮР НЭМСЭН
+# 3. NEW REPORTS TABLE API (with Filters)
 # ---------------------------------------------------------
 
 @staff_member_required(login_url="/django-admin/login/")
@@ -266,72 +263,19 @@ def reports_table_json(request: HttpRequest):
     loc_type = _get_str(request, "location_type")
     date_from = _get_str(request, "date_from")
     date_to = _get_str(request, "date_to")
-    
-    # Бусад параметрүүд
-    aimag_id = _get_int(request, "aimag")
-    sum_id = _get_int(request, "sum")
-    kind = _get_str(request, "kind")
-    status = _get_str(request, "status")
-    q = _get_str(request, "q")
 
     rows = []
 
-    # ==========================
-    # DEVICES
-    # ==========================
-    if report == "devices":
-        qs = Device.objects.select_related("location", "instrument")
-        qs = _apply_aimag_scope(qs, request, "location__aimag_ref_id") # Note: using ref_id
+    # Алхам 2️⃣ — report бүр дотор qs дээр filter хийх
 
-        if aimag_id: qs = qs.filter(location__aimag_ref_id=aimag_id)
-        if sum_id: qs = qs.filter(location__sum_ref_id=sum_id)
-        if kind: qs = qs.filter(kind=kind)
-        if status: qs = qs.filter(status=status)
-        if loc_type: qs = qs.filter(location__location_type=loc_type)
-        if q:
-            qs = qs.filter(Q(serial_number__icontains=q) | Q(location__name__icontains=q))
-
-        for d in qs.order_by("-id")[:500]:
-            rows.append({
-                "c1": d.id,
-                "c2": d.serial_number or "",
-                "c3": str(d.location or ""),
-                "c4": d.kind,
-                "c5": d.status,
-                "c6": str(d.updated_at) if hasattr(d, 'updated_at') else ""
-            })
-            
-    # ==========================
-    # LOCATIONS
-    # ==========================
-    elif report == "locations":
-        qs = Location.objects.select_related("aimag_ref", "sum_ref")
-        qs = _apply_aimag_scope(qs, request, "aimag_ref_id")
-
-        if aimag_id: qs = qs.filter(aimag_ref_id=aimag_id)
-        if sum_id: qs = qs.filter(sum_ref_id=sum_id)
-        if loc_type: qs = qs.filter(location_type=loc_type)
-        if q: qs = qs.filter(name__icontains=q)
-
-        for l in qs.order_by("-id")[:500]:
-            rows.append({
-                "c1": l.id,
-                "c2": l.name,
-                "c3": l.location_type,
-                "c4": str(l.aimag_ref or ""),
-                "c5": str(l.sum_ref or ""),
-                "c6": l.code or ""
-            })
-
-    # ==========================
-    # MOVEMENTS (DeviceMovement)
-    # ==========================
-    elif report == "movements":
+    # ✅ MOVEMENTS
+    if report == "movements":
         qs = DeviceMovement.objects.select_related("device", "from_location", "to_location")
         qs = _apply_aimag_scope(qs, request, "to_location__aimag_ref_id")
 
-        # ⬇⬇⬇ ШҮҮЛТҮҮРҮҮД ⬇⬇⬇
+        # ⬇⬇⬇ FILTERS ⬇⬇⬇
         if date_from:
+            # DeviceMovement дээр moved_at ашиглах нь зөв (гэхдээ хэрэв date гэж байгаа бол date-ээр солино)
             qs = qs.filter(moved_at__gte=date_from)
         if date_to:
             qs = qs.filter(moved_at__lte=date_to)
@@ -341,10 +285,7 @@ def reports_table_json(request: HttpRequest):
                 Q(to_location__location_type=loc_type) |
                 Q(device__location__location_type=loc_type)
             )
-        
-        if aimag_id: qs = qs.filter(to_location__aimag_ref_id=aimag_id)
-        if q: qs = qs.filter(device__serial_number__icontains=q)
-        # ⬆⬆⬆ 
+        # ⬆⬆⬆ FILTERS END ⬆⬆⬆
 
         for m in qs.order_by("-moved_at", "-id")[:500]:
             rows.append({
@@ -356,14 +297,12 @@ def reports_table_json(request: HttpRequest):
                 "c6": str(m.moved_by or "")
             })
 
-    # ==========================
-    # MAINTENANCE (MaintenanceService)
-    # ==========================
+    # ✅ MAINTENANCE
     elif report == "maintenance":
         qs = MaintenanceService.objects.select_related("device", "device__location")
         qs = _apply_aimag_scope(qs, request, "device__location__aimag_ref_id")
 
-        # ⬇⬇⬇ ШҮҮЛТҮҮРҮҮД ⬇⬇⬇
+        # ⬇⬇⬇ FILTERS ⬇⬇⬇
         if date_from:
             qs = qs.filter(date__gte=date_from)
         if date_to:
@@ -371,11 +310,7 @@ def reports_table_json(request: HttpRequest):
 
         if loc_type:
             qs = qs.filter(device__location__location_type=loc_type)
-        
-        if aimag_id: qs = qs.filter(device__location__aimag_ref_id=aimag_id)
-        if status: qs = qs.filter(workflow_status=status)
-        if q: qs = qs.filter(device__serial_number__icontains=q)
-        # ⬆⬆⬆ 
+        # ⬆⬆⬆ FILTERS END ⬆⬆⬆
 
         for x in qs.order_by("-date", "-id")[:500]:
             rows.append({
@@ -386,14 +321,12 @@ def reports_table_json(request: HttpRequest):
                 "c5": x.reason or ""
             })
 
-    # ==========================
-    # CONTROL (ControlAdjustment)
-    # ==========================
+    # ✅ CONTROL
     elif report == "control":
         qs = ControlAdjustment.objects.select_related("device", "device__location")
         qs = _apply_aimag_scope(qs, request, "device__location__aimag_ref_id")
 
-        # ⬇⬇⬇ ШҮҮЛТҮҮРҮҮД ⬇⬇⬇
+        # ⬇⬇⬇ FILTERS ⬇⬇⬇
         if date_from:
             qs = qs.filter(date__gte=date_from)
         if date_to:
@@ -401,11 +334,7 @@ def reports_table_json(request: HttpRequest):
 
         if loc_type:
             qs = qs.filter(device__location__location_type=loc_type)
-        
-        if aimag_id: qs = qs.filter(device__location__aimag_ref_id=aimag_id)
-        if status: qs = qs.filter(workflow_status=status)
-        if q: qs = qs.filter(device__serial_number__icontains=q)
-        # ⬆⬆⬆ 
+        # ⬆⬆⬆ FILTERS END ⬆⬆⬆
 
         for x in qs.order_by("-date", "-id")[:500]:
             rows.append({
