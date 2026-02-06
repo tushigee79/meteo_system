@@ -251,25 +251,17 @@ def dashboard_table_view(request: HttpRequest):
 
 
 # ---------------------------------------------------------
-# 4. Reports Table API (ReportsHub) - ШҮҮЛТҮҮР НЭМСЭН
+# 4. Reports Table API (ReportsHub)
 # ---------------------------------------------------------
 
 @staff_member_required(login_url="/django-admin/login/")
 def reports_table_json(request: HttpRequest):
-    """
-    ReportsHub-ийн хүснэгтийн өгөгдлийг AJAX-аар буцаана.
-    Шүүлтүүрүүд: report_type, location_type, date_from, date_to
-    """
     report = _get_str(request, "report")
-    
-    # Алхам 1️⃣ — request-ээс параметрүүдийг авах (1 удаа)
     loc_type = _get_str(request, "location_type")
     date_from = _get_str(request, "date_from")
     date_to = _get_str(request, "date_to")
-    
-    # Бусад параметрүүд
-    aimag_id = _get_int(request, "aimag")
-    sum_id = _get_int(request, "sum")
+    aimag_id = request.GET.get("aimag")
+    sum_id = request.GET.get("sum")
     kind = _get_str(request, "kind")
     status = _get_str(request, "status")
     q = _get_str(request, "q")
@@ -277,28 +269,44 @@ def reports_table_json(request: HttpRequest):
     rows = []
 
     # ==========================
-    # DEVICES
+    # DEVICES (СҮҮЛИЙН ХУВИЛБАР)
     # ==========================
     if report == "devices":
-        qs = Device.objects.select_related("location", "instrument")
-        qs = _apply_aimag_scope(qs, request, "location__aimag_ref_id") # Note: using ref_id
+        qs = Device.objects.select_related("location", "catalog_item")
+        qs = _apply_aimag_scope(qs, request, "location__aimag_ref_id")
 
-        if aimag_id: qs = qs.filter(location__aimag_ref_id=aimag_id)
-        if sum_id: qs = qs.filter(location__sum_ref_id=sum_id)
-        if kind: qs = qs.filter(kind=kind)
-        if status: qs = qs.filter(status=status)
-        if loc_type: qs = qs.filter(location__location_type=loc_type)
+        if aimag_id and str(aimag_id).isdigit():
+            qs = qs.filter(location__aimag_ref_id=int(aimag_id))
+        if sum_id and str(sum_id).isdigit():
+            qs = qs.filter(location__sum_ref_id=int(sum_id))
+
+        if kind:
+            qs = qs.filter(kind=kind)
+        if status:
+            qs = qs.filter(status=status)
+        if loc_type:
+            qs = qs.filter(location__location_type=loc_type)
+
         if q:
-            qs = qs.filter(Q(serial_number__icontains=q) | Q(location__name__icontains=q))
+            q = q.strip()
+            qs = qs.filter(
+                Q(serial_number__icontains=q) |
+                Q(location__name__icontains=q) |
+                Q(catalog_item__name__icontains=q) |
+                Q(other_name__icontains=q)
+            )
 
         for d in qs.order_by("-id")[:500]:
+            updated = getattr(d, "updated_at", None)
+            cat = d.catalog_item.name if d.catalog_item_id else ""
             rows.append({
                 "c1": d.id,
                 "c2": d.serial_number or "",
                 "c3": str(d.location or ""),
                 "c4": d.kind,
                 "c5": d.status,
-                "c6": str(d.updated_at) if hasattr(d, 'updated_at') else ""
+                "c6": cat or (d.other_name or ""),
+                "c7": str(updated) if updated else "",
             })
             
     # ==========================
@@ -308,8 +316,8 @@ def reports_table_json(request: HttpRequest):
         qs = Location.objects.select_related("aimag_ref", "sum_ref")
         qs = _apply_aimag_scope(qs, request, "aimag_ref_id")
 
-        if aimag_id: qs = qs.filter(aimag_ref_id=aimag_id)
-        if sum_id: qs = qs.filter(sum_ref_id=sum_id)
+        if aimag_id and str(aimag_id).isdigit(): qs = qs.filter(aimag_ref_id=int(aimag_id))
+        if sum_id and str(sum_id).isdigit(): qs = qs.filter(sum_ref_id=int(sum_id))
         if loc_type: qs = qs.filter(location_type=loc_type)
         if q: qs = qs.filter(name__icontains=q)
 
@@ -324,27 +332,19 @@ def reports_table_json(request: HttpRequest):
             })
 
     # ==========================
-    # MOVEMENTS (DeviceMovement)
+    # MOVEMENTS
     # ==========================
     elif report == "movements":
         qs = DeviceMovement.objects.select_related("device", "from_location", "to_location")
         qs = _apply_aimag_scope(qs, request, "to_location__aimag_ref_id")
 
-        # ⬇⬇⬇ ШҮҮЛТҮҮРҮҮД ⬇⬇⬇
-        if date_from:
-            qs = qs.filter(moved_at__gte=date_from)
-        if date_to:
-            qs = qs.filter(moved_at__lte=date_to)
-
+        if date_from: qs = qs.filter(moved_at__gte=date_from)
+        if date_to: qs = qs.filter(moved_at__lte=date_to)
         if loc_type:
-            qs = qs.filter(
-                Q(to_location__location_type=loc_type) |
-                Q(device__location__location_type=loc_type)
-            )
+            qs = qs.filter(Q(to_location__location_type=loc_type) | Q(device__location__location_type=loc_type))
         
-        if aimag_id: qs = qs.filter(to_location__aimag_ref_id=aimag_id)
+        if aimag_id and str(aimag_id).isdigit(): qs = qs.filter(to_location__aimag_ref_id=int(aimag_id))
         if q: qs = qs.filter(device__serial_number__icontains=q)
-        # ⬆⬆⬆ 
 
         for m in qs.order_by("-moved_at", "-id")[:500]:
             rows.append({
@@ -357,25 +357,18 @@ def reports_table_json(request: HttpRequest):
             })
 
     # ==========================
-    # MAINTENANCE (MaintenanceService)
+    # MAINTENANCE
     # ==========================
     elif report == "maintenance":
         qs = MaintenanceService.objects.select_related("device", "device__location")
         qs = _apply_aimag_scope(qs, request, "device__location__aimag_ref_id")
 
-        # ⬇⬇⬇ ШҮҮЛТҮҮРҮҮД ⬇⬇⬇
-        if date_from:
-            qs = qs.filter(date__gte=date_from)
-        if date_to:
-            qs = qs.filter(date__lte=date_to)
-
-        if loc_type:
-            qs = qs.filter(device__location__location_type=loc_type)
-        
-        if aimag_id: qs = qs.filter(device__location__aimag_ref_id=aimag_id)
+        if date_from: qs = qs.filter(date__gte=date_from)
+        if date_to: qs = qs.filter(date__lte=date_to)
+        if loc_type: qs = qs.filter(device__location__location_type=loc_type)
+        if aimag_id and str(aimag_id).isdigit(): qs = qs.filter(device__location__aimag_ref_id=int(aimag_id))
         if status: qs = qs.filter(workflow_status=status)
         if q: qs = qs.filter(device__serial_number__icontains=q)
-        # ⬆⬆⬆ 
 
         for x in qs.order_by("-date", "-id")[:500]:
             rows.append({
@@ -387,25 +380,18 @@ def reports_table_json(request: HttpRequest):
             })
 
     # ==========================
-    # CONTROL (ControlAdjustment)
+    # CONTROL
     # ==========================
     elif report == "control":
         qs = ControlAdjustment.objects.select_related("device", "device__location")
         qs = _apply_aimag_scope(qs, request, "device__location__aimag_ref_id")
 
-        # ⬇⬇⬇ ШҮҮЛТҮҮРҮҮД ⬇⬇⬇
-        if date_from:
-            qs = qs.filter(date__gte=date_from)
-        if date_to:
-            qs = qs.filter(date__lte=date_to)
-
-        if loc_type:
-            qs = qs.filter(device__location__location_type=loc_type)
-        
-        if aimag_id: qs = qs.filter(device__location__aimag_ref_id=aimag_id)
+        if date_from: qs = qs.filter(date__gte=date_from)
+        if date_to: qs = qs.filter(date__lte=date_to)
+        if loc_type: qs = qs.filter(device__location__location_type=loc_type)
+        if aimag_id and str(aimag_id).isdigit(): qs = qs.filter(device__location__aimag_ref_id=int(aimag_id))
         if status: qs = qs.filter(workflow_status=status)
         if q: qs = qs.filter(device__serial_number__icontains=q)
-        # ⬆⬆⬆ 
 
         for x in qs.order_by("-date", "-id")[:500]:
             rows.append({
@@ -471,3 +457,9 @@ def chart_workflow_json(request: HttpRequest):
     devices_qs = Device.objects.all()
     wf_data = _build_workflow_counts_for_range(user, devices_qs, date_from, date_to)
     return JsonResponse(wf_data, safe=False, json_dumps_params={"ensure_ascii": False})
+# ---------------------------------------------------------------------
+# PATCH 3.x COMPAT ALIASES
+# admin.py expects these names
+# ---------------------------------------------------------------------
+workflow_pending = workflow_pending_dashboard
+workflow_audit = workflow_audit_log

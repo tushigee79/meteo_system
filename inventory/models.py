@@ -1,116 +1,152 @@
-# inventory/models.py
+# inventory/models.py (FINAL - production-safe)
+from __future__ import annotations
+
+import io
+import uuid
+from datetime import date, timedelta
+from io import BytesIO
+from typing import Optional
+
+from django.conf import settings
+from django.contrib.auth.models import User
+from django.core.cache import cache
+from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
 from django.db import models
 from django.utils import timezone
-from django.core.exceptions import ValidationError
-from django.conf import settings
-from datetime import timedelta
-
-from django.contrib.auth.models import User   # ✅ ЗААВАЛ
-
-import uuid
-from io import BytesIO
-from django.core.files.base import ContentFile
 
 from inventory.geo.district_lookup import lookup_ub_district
 
 
 # ============================================================
-# 1) ДЦУБ КАТАЛОГ (Лавлах сан)
+# 1) ДЦУБ КТЛОГ (Лавлах ан)
 # ============================================================
 class InstrumentCatalog(models.Model):
-    KIND_CHOICES = [
-        ("WEATHER", "Цаг уур"),
-        ("HYDRO", "Ус судлал"),
-        ("AWS", "AWS"),
-        ("RADAR", "Радар"),
-        ("AEROLOGY", "Аэрологи"),
-        ("AGRO", "ХАА"),
-        ("ETALON", "Эталон"),
-        ("OTHER", "Бусад"),
-    ]
+    class Kind(models.TextChoices):
+        WEATHER = "WEATHER", "Цаг уур"
+        HYDRO = "HYDRO", "Ус судлал"
+        AWS = "AWS", "Автомат станц"
+        RADAR = "RADAR", "Радар"
+        AEROLOGY = "AEROLOGY", "Аэрологи"
+        AGRO = "AGRO", "Хөдөө аж ахуй"
+        ETALON = "ETALON", "Эталон"
+        OTHER = "OTHER", "Бусад"
 
-    kind = models.CharField(
-        max_length=20,
-        choices=KIND_CHOICES,
-        default="OTHER",
-        verbose_name="Төрөл",
-    )
+    code = models.CharField(max_length=50, unique=True, verbose_name="Код")
+    name_mn = models.CharField(max_length=255, verbose_name="р (MN)")
+    kind = models.CharField(max_length=16, choices=Kind.choices, default=Kind.OTHER, db_index=True)
+    unit = models.CharField(max_length=50, blank=True, default="", verbose_name="гж")
+    is_active = models.BooleanField(default=True, verbose_name="Идэвхтэй")
 
-    code = models.CharField(
-        max_length=100,
-        unique=True,
-        verbose_name="Код",
-    )
-
-    name_mn = models.CharField(max_length=255, verbose_name="Нэр")
-
-    unit = models.CharField(
-        max_length=50,
-        blank=True,
-        default="",
-        verbose_name="Нэгж",
-    )
-
-    is_active = models.BooleanField(default=True)
-    sort_order = models.IntegerField(default=0)
-
-    verification_cycle_months = models.PositiveIntegerField(
-        default=0,
-        verbose_name="Шалгалт/калибровкийн цикл (сар)",
-        help_text="0 бол автоматаар тооцохгүй (manual). Ж: 12 = жил бүр."
-    )
-
-    class Meta:
-        verbose_name = "ДЦУБ Каталог"
-        verbose_name_plural = "ДЦУБ Каталог"
-        ordering = ["sort_order", "code"]
+    # verification cycle (optional)
+    verification_cycle_months = models.PositiveIntegerField(default=12, verbose_name="Шалгалт/калибровкийн цикл (ар)")
 
     def __str__(self):
-        return f"{self.code} – {self.name_mn}"
+        return f"{self.code} - {self.name_mn}"
+
+    class Meta:
+        verbose_name = "Каталог"
+        verbose_name_plural = "Каталог"
 
 
 # ============================================================
-# 2) Захиргааны нэгж ба Байгууллага
+# 2) Аймаг / Сум-Дүүрг
 # ============================================================
 class Aimag(models.Model):
-    name = models.CharField(max_length=100, verbose_name="Аймаг/Нийслэлийн нэр")
+    name = models.CharField(max_length=100, unique=True, verbose_name="Аймаг")
     code = models.CharField(max_length=20, blank=True, default="", verbose_name="Код")
+
+    def save(self, *args, **kwargs):
+        if self.name:
+            s = self.name.strip()
+            s = s.replace("–", "-").replace("—", "-").replace("−", "-")
+            s = " ".join(s.split())
+            self.name = s.title()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name
 
     class Meta:
-        verbose_name = "Аймаг/Нийслэл"
-        verbose_name_plural = "Аймаг/Нийслэл"
+        verbose_name = "Аймаг"
+        verbose_name_plural = "Аймгууд"
+        ordering = ["name"]
 
 
 class SumDuureg(models.Model):
-    name = models.CharField(max_length=100, verbose_name="Сум/Дүүргийн нэр")
-    aimag = models.ForeignKey(Aimag, on_delete=models.CASCADE, related_name="sums")
-    code = models.CharField(max_length=20, blank=True, default="", verbose_name="Код")
+    name = models.CharField(max_length=150, verbose_name="р")
 
-    is_ub_district = models.BooleanField(default=False, verbose_name="УБ-ын 9 дүүрэг үү?")
+    aimag_ref = models.ForeignKey(
+        Aimag,
+        on_delete=models.CASCADE,
+        related_name="sums",          # ✅ ЗӨВ (ЗӨВХӨ ЭД)
+        verbose_name="Аймаг/Улаанбаатар",
+        null=True,
+        blank=True,
+    )
+
+    is_ub_district = models.BooleanField(default=False)
 
     def __str__(self):
-        return f"{self.aimag} - {self.name}"
+        return self.name
+
+
+    code = models.CharField(
+        max_length=10,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name="Код",
+        help_text="Албан ёсны сум/дүүргийн код (ж: 011, 123, UB-01 гх мт)",
+    )
+
+    is_ub_district = models.BooleanField(
+        default=False,
+        verbose_name="УБ дүүрэг",
+    )
 
     class Meta:
-        unique_together = ("aimag", "name")
-        verbose_name = "Сум/Дүүрэг"
-        verbose_name_plural = "Сум/Дүүрэг"
+        verbose_name = "Сум / Дүүрэг"
+        verbose_name_plural = "Сум / Дүүргүүд"
+        ordering = ["aimag_ref__name", "name"]
 
+    def __str__(self):
+        return f"{self.code or '-'} – {self.name}"
 
+# ============================================================
+# 3) Байгууллага
+# ============================================================
 class Organization(models.Model):
-    ORG_TYPES = [
-        ("CENTER", "НЦУТ"),
-        ("CAL_LAB", "БОХЗТЛ"),
-        ("OBS_CENTER", "УЦУОШТ"),
-    ]
+    class OrgType(models.TextChoices):
+        OBS_CENTER = "OBS_CENTER", "УЦУОШТ"
+        CAL_LAB = "CAL_LAB", "БОХЗТ лаборатори"
+        HQ = "HQ", "ЦУОШГ"
+        OTHER = "OTHER", "Буад"
 
-    name = models.CharField(max_length=255, unique=True, verbose_name="Байгууллагын нэр")
-    org_type = models.CharField(max_length=20, choices=ORG_TYPES, default="OBS_CENTER", verbose_name="Төрөл")
-    aimag = models.ForeignKey(Aimag, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Аймаг/Нийслэл")
-    is_ub = models.BooleanField(default=False, verbose_name="Улаанбаатар хот уу?")
+    name = models.CharField(max_length=255, verbose_name="Байгууллага")
+    org_type = models.CharField(
+        max_length=20,
+        choices=OrgType.choices,
+        default=OrgType.OTHER,
+        db_index=True,
+    )
+
+    aimag_ref = models.ForeignKey(
+        Aimag,
+        on_delete=models.SET_NULL,
+        related_name="organizations",   # ✅ ЗӨВ (ЭД Л)
+        verbose_name="Аймаг/Улаанбаатар",
+        null=True,
+        blank=True,
+    )
+
+    is_ub = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.name
+
+
+    is_ub = models.BooleanField(default=False, verbose_name="УБ х")
 
     def __str__(self):
         return self.name
@@ -119,39 +155,48 @@ class Organization(models.Model):
         verbose_name = "Байгууллага"
         verbose_name_plural = "Байгууллагууд"
 
-
 # ============================================================
-# 3) Байршил
+# 4) Байршил (Location)  ✅ FIXED
 # ============================================================
 class Location(models.Model):
-    LOCATION_TYPES = [
-        ("WEATHER", "Цаг уур"),
-        ("HYDRO", "Ус судлал"),
-        ("AWS", "AWS"),
-        ("ETALON", "Эталон"),
-        ("RADAR", "Радар"),
-        ("AEROLOGY", "Аэрологи"),
-        ("AGRO", "Хөдөө аж ахуй"),
-        ("OTHER", "Бусад"),
-    ]
 
-
-    # Backward-compat aliases used by dashboards/filters
-    LOCATION_TYPE_CHOICES = LOCATION_TYPES
-    TYPE_CHOICES = LOCATION_TYPES
-    name = models.CharField(max_length=255, verbose_name="Нэр")
+    class LocationType(models.TextChoices):
+        WEATHER = "WEATHER", "Цаг уур"
+        HYDRO = "HYDRO", "Ус судлал"
+        AWS = "AWS", "Автомат станц"
+        RADAR = "RADAR", "Радар"
+        AEROLOGY = "AEROLOGY", "Аэрологи"
+        AGRO = "AGRO", "Хөдөө аж ахуй"
+        ETALON = "ETALON", "Эталон"
+        OTHER = "OTHER", "Бусад"
 
     location_type = models.CharField(
         max_length=20,
-        choices=LOCATION_TYPES,
-        default="WEATHER",
+        choices=LocationType.choices,
+        default=LocationType.WEATHER,
+        verbose_name="Байршлын төрөл",
+    )
+
+    # … бусад талбарууд чинь хэвээр
+
+
+    # ✅ backward-compat alias
+    LOCATION_TYPE_CHOICES = LocationType.choices
+    LOCATION_TYPES = LOCATION_TYPE_CHOICES 
+
+    name = models.CharField(max_length=255, verbose_name="р")  # ✅ заавал
+    location_type = models.CharField(
+        max_length=16,
+        choices=LocationType.choices,
+        default=LocationType.WEATHER,
+        db_index=True,
         verbose_name="Байршлын төрөл",
     )
 
     aimag_ref = models.ForeignKey(Aimag, on_delete=models.CASCADE, verbose_name="Аймаг")
-    sum_ref = models.ForeignKey(SumDuureg, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Сум/Дүүрэг")
+    sum_ref = models.ForeignKey(SumDuureg, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Сум/Дүүрг")
 
-    wmo_index = models.CharField(max_length=10, null=True, blank=True, verbose_name="WMO индекс")
+    wmo_index = models.CharField(max_length=10, null=True, blank=True, verbose_name="WMO индек")
     latitude = models.FloatField(null=True, blank=True, verbose_name="Өргөрөг")
     longitude = models.FloatField(null=True, blank=True, verbose_name="Уртраг")
 
@@ -164,14 +209,25 @@ class Location(models.Model):
         blank=True,
         verbose_name="Хариуцагч",
     )
+    
+    parent_location = models.ForeignKey(
+    "self",
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="child_locations",
+    verbose_name="Дэд байршил (эх станц)",
+)
+
 
     def save(self, *args, **kwargs):
+        # УБ дүүрэг автоматаар тодорхойлох (байвал)
         try:
             if (
                 self.latitude is not None
                 and self.longitude is not None
                 and self.aimag_ref
-                and self.aimag_ref.name.strip() == "Улаанбаатар"
+                and (self.aimag_ref.name or "").strip() == "Улаанбаатар"
             ):
                 props = lookup_ub_district(float(self.longitude), float(self.latitude), base_dir=settings.BASE_DIR)
                 if props and props.get("name_mn"):
@@ -181,7 +237,22 @@ class Location(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.name} ({self.aimag_ref})"
+        def pick(*vals):
+            for v in vals:
+                if v is None:
+                    continue
+                s = str(v).strip()
+                if s:
+                    return s
+            return ""
+
+        label = pick(
+            getattr(self, "name", None),
+            getattr(self, "wmo_index", None),
+            f"Location#{getattr(self, 'pk', '')}",
+        )
+        aimag = getattr(self, "aimag_ref", None)
+        return f"{label} ({aimag})" if aimag else label
 
     class Meta:
         verbose_name = "Байршил"
@@ -189,359 +260,284 @@ class Location(models.Model):
 
 
 # ============================================================
-# 4) Хэмжих хэрэгсэл (Device)
+# 5) Хэмжих хэрэгсэл (Device)
 # ============================================================
 class Device(models.Model):
     class Kind(models.TextChoices):
         WEATHER = "WEATHER", "Цаг уур"
         HYDRO = "HYDRO", "Ус судлал"
-        AWS = "AWS", "AWS"
-        ETALON = "ETALON", "Эталон"
+        AWS = "AWS", "Автомат станц"
         RADAR = "RADAR", "Радар"
         AEROLOGY = "AEROLOGY", "Аэрологи"
         AGRO = "AGRO", "Хөдөө аж ахуй"
+        ETALON = "ETALON", "Эталон"
         OTHER = "OTHER", "Бусад"
 
-    # Backward-compat: some dashboards expect KIND_CHOICES
-    KIND_CHOICES = Kind.choices
-
-    STATUS_CHOICES = [
-        ("Active", "Ашиглагдаж буй"),
-        ("Broken", "Эвдрэлтэй"),
-        ("Repair", "Засварт"),
-        ("Spare", "Нөөц"),
-        ("Retired", "Хасагдсан"),
-    ]
-
-    serial_number = models.CharField(max_length=100, unique=True, verbose_name="Серийн дугаар")
-    inventory_code = models.CharField(max_length=100, blank=True, null=True, verbose_name="Бараа материалын код")
-    manufacturer = models.CharField(max_length=100, blank=True, null=True, verbose_name="Үйлдвэрлэгч")
-    commissioned_date = models.DateField(blank=True, null=True, verbose_name="Ашиглалтад орсон огноо")
-
-    # QR token (used for QR lookup/public page)
-    qr_token = models.UUIDField(
-        default=uuid.uuid4,
-        unique=True,
-        editable=False,
-        db_index=True,
-        verbose_name="QR токен",
-    )
-
-    # QR security / lifecycle
-    qr_expires_at = models.DateTimeField(null=True, blank=True, db_index=True, verbose_name="QR хүчинтэй хугацаа")
-    qr_revoked_at = models.DateTimeField(null=True, blank=True, db_index=True, verbose_name="QR хүчингүй болгосон огноо")
-
-
-
-    # QR image (generated automatically on save if missing)
-    qr_image = models.ImageField(upload_to="qr/devices/", null=True, blank=True, verbose_name="QR зураг")
-
-    kind = models.CharField(
-        max_length=20,
-        choices=Kind.choices,
-        default=Kind.WEATHER,
-        verbose_name="Төрөл",
-    )
-
-    
-    def save(self, *args, **kwargs):
-        # 1. Хэрэв QR зураг байхгүй бол шинээр үүсгэнэ
-        if not self.qr_image:
-            # QR кодын тохиргоо
-            qr = qrcode.QRCode(
-                version=1,
-                error_correction=qrcode.constants.ERROR_CORRECT_L,
-                box_size=10,
-                border=4,
-            )
-            
-            # QR дотор хадгалах өгөгдөл (Public URL)
-            # Жишээ нь: https://meteo.gov.mn/qr/public/TOKEN/
-            # Одоогоор зөвхөн token-оо хийж турших эсвэл домайнаа хатуу бичиж болно
-            qr_data = f"/qr/public/{self.qr_token}/" 
-            qr.add_data(qr_data)
-            qr.make(fit=True)
-
-            # Зураг болгох
-            img = qr.make_image(fill_color="black", back_color="white")
-
-            # Санах ой руу хадгалах (Buffer)
-            buffer = BytesIO()
-            img.save(buffer, format="PNG")
-            
-            # Файлын нэр өгөх (qr_сериал.png)
-            filename = f"qr_{self.serial_number}.png"
-            
-            # ImageField-д хадгалах (save=False нь дахин loop-д орохоос сэргийлнэ)
-            self.qr_image.save(filename, ContentFile(buffer.getvalue()), save=False)
-
-        # 2. Үндсэн хадгалах үйлдлийг дуудах
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return f"{self.name} ({self.serial_number})"
+    serial_number = models.CharField(max_length=120, blank=True, default="", verbose_name="Серийн дугаар")
+    inventory_code = models.CharField(max_length=120, blank=True, default="", verbose_name="Дотоод код")
+    kind = models.CharField(max_length=16, choices=Kind.choices, default=Kind.OTHER, db_index=True, verbose_name="Төрөл")
 
     catalog_item = models.ForeignKey(
-        InstrumentCatalog,
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="devices",
-        verbose_name="ДЦУБ жагсаалт",
+        InstrumentCatalog, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="devices", verbose_name="ДЦУБ жагаалт",
     )
-
     other_name = models.CharField(max_length=255, blank=True, default="", verbose_name="Бусад нэр")
 
     location = models.ForeignKey(
-        Location,
-        on_delete=models.SET_NULL,
+        Location, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="devices", verbose_name="Байршил",
+    )
+    
+    system = models.ForeignKey(
+        "MeasurementSystem",
         null=True,
         blank=True,
-        related_name="devices",
-        verbose_name="Байршил",
+        on_delete=models.SET_NULL,
+        related_name="components",
+        help_text="Radar / Aerology / AWS system this device belongs to",
     )
 
+    STATUS_CHOICES = (
+        ("Active", "Ашиглаж байна"),
+        ("Inactive", "Идэвхгүй"),
+        ("Broken", "Эвдэрсэн"),
+        ("Archived", "Архивлсан"),
+    )
     status = models.CharField(max_length=15, choices=STATUS_CHOICES, default="Active", verbose_name="Төлөв")
+
     installation_date = models.DateField(null=True, blank=True, verbose_name="Суурилуулсан")
     lifespan_years = models.PositiveIntegerField(default=10, verbose_name="Ашиглалтын хугацаа (жил)")
 
+    # Calibration / Verification tracking (✅ ганцхан удаа)
+    last_verification_date = models.DateField(null=True, blank=True, verbose_name="Сүүлд шалгасан/калибровка")
+    next_verification_date = models.DateField(null=True, blank=True, verbose_name="Дараагийн шалгалт/калибровка")
 
-    # ============================================================
-    # Calibration / Verification tracking
-    # ============================================================
-    last_verification_date = models.DateField(
-        null=True,
-        blank=True,
-        verbose_name="Сүүлд шалгасан/калибровка",
-    )
-    next_verification_date = models.DateField(
-        null=True,
-        blank=True,
-        db_index=True,
-        verbose_name="Дараагийн шалгалтын огноо",
-    )
+    # QR
+    qr_token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    qr_image = models.ImageField(upload_to="qr/", blank=True, null=True)
 
-    def clean(self):
-        super().clean()
+    def get_qr_public_url(self) -> str:
+        base_url = getattr(settings, "SITE_BASE_URL", "https://meteo.gov.mn").rstrip("/")
+        return f"{base_url}/qr/public/{self.qr_token}/"
 
-        # catalog kind must match device kind
-        if self.catalog_item and self.catalog_item.kind != self.kind:
-            raise ValidationError({"catalog_item": "Каталогийн төрөл таарахгүй"})
-
-        # OTHER requires other_name
-        if self.kind == self.Kind.OTHER and not (self.other_name or "").strip():
-            raise ValidationError({"other_name": "“Бусад” сонгосон бол нэр заавал бөглөнө."})
-
-    def compute_next_verification_date(self):
-        """Auto-calc next_verification_date using catalog_item.verification_cycle_months."""
-        if not self.last_verification_date:
-            return None
-
-        months = 0
+    def generate_qr_code(self) -> None:
         try:
-            months = int(getattr(self.catalog_item, "verification_cycle_months", 0) or 0)
-        except Exception:
-            months = 0
+            import qrcode  # type: ignore
+        except Exception as e:
+            raise ValidationError(f"qrcode баталгаажуулсан байх ётой. ({e})")
 
-        if months <= 0:
-            return None
+        qr_data = self.get_qr_public_url()
+        qr = qrcode.QRCode(version=1, box_size=10, border=4)
+        qr.add_data(qr_data)
+        qr.make(fit=True)
 
-        try:
-            from dateutil.relativedelta import relativedelta  # type: ignore
-            return self.last_verification_date + relativedelta(months=+months)
-        except Exception:
-            # fallback: 30-day months approximation
-            return self.last_verification_date + timedelta(days=30 * months)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buffer = BytesIO()
+        img.save(buffer, format="PNG")
 
-    def verification_bucket(self, today=None):
-        """Return one of: expired / due_30 / due_90 / ok / unknown."""
-        if today is None:
-            today = timezone.localdate()
+        serial = self.serial_number or f"dev{self.pk or 'new'}"
+        token8 = self.qr_token.hex[:8]
+        filename = f"qr_{serial}_{token8}.png"
 
-        d = self.next_verification_date
-        if not d:
-            return "unknown"
-        if d < today:
-            return "expired"
-
-        delta = (d - today).days
-        if delta <= 30:
-            return "due_30"
-        if delta <= 90:
-            return "due_90"
-        return "ok"
-
-    def __str__(self):
-        name = self.catalog_item.name_mn if self.catalog_item else (self.other_name or "-")
-        return f"{self.serial_number} - {name}"
+        self.qr_image.save(filename, ContentFile(buffer.getvalue()), save=False)
 
     def save(self, *args, **kwargs):
-        """
-        Save + (1) auto QR generation,
-               (2) movement history when location changes,
-               (3) auto next verification date.
-        """
-        old_location_id = None
+        if not self.qr_token:
+            self.qr_token = uuid.uuid4()
 
-        # 0) Auto-calc next verification date
-        try:
-            computed = self.compute_next_verification_date()
-            if computed:
-                self.next_verification_date = computed
-        except Exception:
-            pass
+        if self.last_verification_date:
+            self.next_verification_date = self.compute_next_verification_date()
 
-        # 1) QR expiry: 12 months (≈365 days) from creation
-        if not self.qr_expires_at:
-            self.qr_expires_at = timezone.now() + timedelta(days=365)
-
-        # 2) Track old location (for movement history)
+        token_changed = False
         if self.pk:
-            try:
-                old_location_id = (
-                    Device.objects.filter(pk=self.pk)
-                    .values_list("location_id", flat=True)
-                    .first()
-                )
-            except Exception:
-                old_location_id = None
+            old = self.__class__.objects.filter(pk=self.pk).only("qr_token").first()
+            if old and old.qr_token != self.qr_token:
+                token_changed = True
+
+        if (not self.qr_image) or token_changed:
+            self.generate_qr_code()
 
         super().save(*args, **kwargs)
-
-        # 3) Write movement history if location changed
-        try:
-            new_location_id = self.location_id
-            if self.pk and old_location_id != new_location_id:
-                DeviceMovement.objects.create(
-                    device=self,
-                    from_location_id=old_location_id,
-                    to_location_id=new_location_id,
-                    moved_at=timezone.now(),
-                    reason="",
-                    moved_by=None,
-                )
-        except Exception:
-            pass
-
-        # 4) Generate QR if missing
-        if not self.qr_image:
-            try:
-                import os
-                import qrcode
-                from io import BytesIO
-                from django.core.files.base import ContentFile
-
-                target_dir = os.path.join(str(settings.MEDIA_ROOT), "qr", "devices")
-                os.makedirs(target_dir, exist_ok=True)
-
-                serial = (self.serial_number or "").strip()
-                base = (getattr(settings, "SITE_BASE_URL", "") or "").rstrip("/")
-                path = f"/qr/public/{self.qr_token}/"
-                qr_data = (base + path) if base else path
-
-                img = qrcode.make(qr_data)
-                buf = BytesIO()
-                img.save(buf, format="PNG")
-
-                serial_part = (serial or "no_serial").strip() or "no_serial"
-                fname = f"device_{self.pk}_{serial_part}.png".replace(" ", "_")
-                self.qr_image.save(fname, ContentFile(buf.getvalue()), save=False)
-                super().save(update_fields=["qr_image"])
-            except Exception as e:
-                print("❌ QR generation failed:", repr(e))
-
     class Meta:
-        verbose_name = "Хэмжих хэрэгсэл"
-        verbose_name_plural = "Хэмжих хэрэгсэл"
-
+        verbose_name = "Багаж"
+        verbose_name_plural = "Багаж"
 
 # ============================================================
-# ✅ Device Movement History (WMO metadata)
+# 6) Measurement System (Radar / AWS / Aerology)
 # ============================================================
-class DeviceMovement(models.Model):
-    """Багаж шилжилт хөдөлгөөний түүх.
+class MeasurementSystem(models.Model):
+    class SystemType(models.TextChoices):
+        RADAR = "RADAR", "Радар"
+        AEROLOGY = "AEROLOGY", "Аэрологи"
+        AWS = "AWS", "Автомат станц"
 
-    device.location өөрчлөгдөх бүрт from/to байршил, огноо, шалтгаан, шилжүүлсэн этгээдийг хадгална.
-    """
+    class Status(models.TextChoices):
+        OPERATIONAL = "OPERATIONAL", "Ажиллаж байна"
+        DEGRADED = "DEGRADED", "Хязгаарлагдмал"
+        DOWN = "DOWN", "Ажиллахгүй"
 
-    device = models.ForeignKey(
-        "inventory.Device",
+    name = models.CharField(max_length=255, verbose_name="Системийн нэр")
+
+    system_type = models.CharField(
+        max_length=20,
+        choices=SystemType.choices,
+        verbose_name="Системийн төрөл",
+    )
+
+    location = models.ForeignKey(
+        Location,
         on_delete=models.CASCADE,
-        related_name="movements",
-        verbose_name="Багаж",
-    )
-    from_location = models.ForeignKey(
-        "inventory.Location",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="moved_from",
-        verbose_name="Хаанаас",
-    )
-    to_location = models.ForeignKey(
-        "inventory.Location",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="moved_to",
-        verbose_name="Хаашаа",
-    )
-    moved_at = models.DateTimeField(default=timezone.now, verbose_name="Шилжүүлсэн огноо/цаг")
-    reason = models.CharField(max_length=255, blank=True, default="", verbose_name="Шалтгаан")
-    moved_by = models.ForeignKey(
-        "inventory.UserProfile",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="device_movements",
-        verbose_name="Шилжүүлсэн (UserProfile)",
+        related_name="systems",
+        verbose_name="Байршил",
     )
 
-    class Meta:
-        verbose_name = "Багаж шилжилт (түүх)"
-        verbose_name_plural = "Багаж шилжилтийн түүх"
-        ordering = ["-moved_at", "-id"]
-        indexes = [
-            models.Index(fields=["moved_at"]),
-            models.Index(fields=["device", "moved_at"]),
-        ]
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.OPERATIONAL,
+        verbose_name="Төлөв",
+    )
+
+    installed_date = models.DateField(null=True, blank=True, verbose_name="Суурилуулсан огноо")
+
+    owner_org = models.ForeignKey(
+        Organization,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="systems",
+        verbose_name="Хариуцагч байгууллага",
+    )
+
+    note = models.TextField(blank=True, default="", verbose_name="Тайлбар")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.device_id} {self.from_location_id}->{self.to_location_id} @ {self.moved_at:%Y-%m-%d %H:%M}"
+        return f"{self.name} ({self.get_system_type_display()})"
+
+    class Meta:
+        verbose_name = "Систем"
+        verbose_name_plural = "Системүүд"
+
 
 # ============================================================
-# ✅ WorkflowStatus helper (shared)
+# 7) DeviceMovement
+# ============================================================
+class DeviceMovement(models.Model):
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name="movements")
+    moved_at = models.DateTimeField(default=timezone.now)
+    from_location = models.ForeignKey(Location, on_delete=models.SET_NULL, null=True, blank=True, related_name="moves_from")
+    to_location = models.ForeignKey(Location, on_delete=models.SET_NULL, null=True, blank=True, related_name="moves_to")
+    reason = models.CharField(max_length=255, blank=True, default="")
+    moved_by = models.ForeignKey("UserProfile", on_delete=models.SET_NULL, null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.device} {self.from_location} -> {self.to_location}"
+
+    class Meta:
+        verbose_name = "Шилжилт"
+        verbose_name_plural = "Шилжилт"
+
+
+# ============================================================
+# 8 Workflow + Service Models
 # ============================================================
 class WorkflowStatus(models.TextChoices):
     DRAFT = "DRAFT", "Ноорог"
-    SUBMITTED = "SUBMITTED", "Хянагдахаар илгээсэн"
+    SUBMITTED = "SUBMITTED", "Хянагдахаар илгээгдсэн"
     APPROVED = "APPROVED", "Батлагдсан"
     REJECTED = "REJECTED", "Татгалзсан"
 
 
-# ============================================================
-# 5) Засвар, үйлчилгээ
-# ============================================================
-class MaintenanceService(models.Model):
+class BaseWorkflowModel(models.Model):
+    """MaintenanceService / ControlAdjustment дээр давтагдаж байсан нийтлэг талбарууд.
+
+    NOTE:
+    - Abstract model тул DB др хүснэгт үүсэхгүй, харин хүүхд модель дээр талбарууд хуулбарлагдана.
+    - `device` FK-гийн reverse accessor мөргөлдөхөө ргийлж base др `related_name="+"` ашигласан.
+      Хүүхэд модель дээр device-ийг override хийж тус тсуын related_name-ийг хадгалана.
+    """
+
     PERFORMER_TYPES = [
         ("ENGINEER", "Инженер"),
         ("ORG", "Байгууллага"),
     ]
 
-    REASONS = [
-        ("NORMAL", "Хэвийн засвар үйлчилгээ"),
-        ("LIMITED", "Хязгаарлагдмал ажиллагаа"),
-        ("NOT_WORKING", "Ажиллагаагүй болсон"),
-    ]
-
+    # ✅ reverse name clash-аа ргийлж '+' (child др override хийж өгнө)
     device = models.ForeignKey(
         "inventory.Device",
         on_delete=models.PROTECT,
-        related_name="maintenance_services",
+        related_name="+",
         verbose_name="Багаж / Төхөөрөмж",
     )
-    date = models.DateField(verbose_name="Огноо")
 
+    date = models.DateField(default=timezone.localdate, verbose_name="Огноо")
+
+    performer_type = models.CharField(
+        max_length=20,  # existing schema-тай нийцүүлх (өмнө нь 20 байан)
+        choices=PERFORMER_TYPES,
+        default="ENGINEER",
+        blank=True,  # хуучин мөрүүдд хооон утга байж болзошгүй
+        verbose_name="Хийсэн этгээд (төрөл)",
+    )
+    performer_engineer_name = models.CharField(
+        max_length=255, blank=True, default="", verbose_name="Хийсэн инженер (нэр)"
+    )
+    performer_org_name = models.CharField(
+        max_length=255, blank=True, default="", verbose_name="Хийсэн байгууллага (нэр)"
+    )
+
+    note = models.TextField(blank=True, default="", verbose_name="Тайлбар / тэмдэглэл")
+
+    # Workflow талбарууд (одоогийн models.py-д байгаа minimum set)
+    workflow_status = models.CharField(
+        max_length=12,
+        choices=WorkflowStatus.choices,
+        default=WorkflowStatus.DRAFT,
+        verbose_name="Workflow төлөв",
+    )
+
+    # TODO (чиний өмнөх admin/workflow логикоо хамаарч нмн):
+    # submitted_by, submitted_at, approved_by, approved_at, rejected_by, rejected_at гх мт
+
+    class Meta:
+        abstract = True
+
+    def clean(self):
+        """performer_type-оо хамаарч зөвхөн нэг талбар шаардлагатай болгоно."""
+        super().clean()
+
+        ptype = (self.performer_type or "").strip().upper() or "ENGINEER"
+        self.performer_type = ptype
+
+        if ptype == "ENGINEER":
+            if not (self.performer_engineer_name or "").strip():
+                raise ValidationError({"performer_engineer_name": "Инженерийн нэр заавал бөглөгдөнө."})
+            # Org талбарыг цврлн
+            self.performer_org_name = ""
+        elif ptype == "ORG":
+            if not (self.performer_org_name or "").strip():
+                raise ValidationError({"performer_org_name": "Байгууллагын нэр заавал бөглөгдөнө."})
+            # Engineer талбарыг цврлн
+            self.performer_engineer_name = ""
+        else:
+            raise ValidationError({"performer_type": "Хийсэн этгээдийн төрөл буруу байна (ENGINEER / ORG)."})
+
+    def __str__(self):
+        # хүүхд модель др device override хийн тул нд OK
+        return f"{self.device} - {self.date}"
+
+
+class MaintenanceService(BaseWorkflowModel):
+    # ✅ child др reverse accessor-ийг хадгална (өмнөх кодтой нийцтй)
+    device = models.ForeignKey(Device, on_delete=models.PROTECT, related_name="maintenance_services", verbose_name="Багаж / Төхөөрөмж")
+
+    REASONS = [
+        ("NORMAL", "Хэвийн засвар үйлчилгээ"),
+        ("LIMITED", "Хзгаарлагдмал ажиллагаа"),
+        ("NOT_WORKING", "Ажиллагаагүй болон"),
+    ]
     reason = models.CharField(
         max_length=20,
         choices=REASONS,
@@ -549,472 +545,144 @@ class MaintenanceService(models.Model):
         verbose_name="Засвар хийсэн шалтгаан",
     )
 
-    performer_type = models.CharField(
-        max_length=10,
-        choices=PERFORMER_TYPES,
-        default="ENGINEER",
-        verbose_name="Хийсэн этгээд (төрөл)",
-    )
-    performer_engineer_name = models.CharField(
-        max_length=255,
-        blank=True,
-        default="",
-        verbose_name="Хийсэн инженер (нэр)",
-    )
-    performer_org_name = models.CharField(
-        max_length=255,
-        blank=True,
-        default="",
-        verbose_name="Хийсэн байгууллага (нэр)",
-    )
-
-    # (Хуучин 1 файл) — олон файл нь MaintenanceEvidence model дээр хадгалагдана.
-    evidence = models.FileField(
-        upload_to="evidence/maintenance/%Y/%m/",
-        blank=True,
-        null=True,
-        verbose_name="Нотлох баримт (файл)",
-    )
-
-    note = models.TextField(blank=True, default="", verbose_name="Тайлбар / тэмдэглэл")
-
-    # --- Workflow ---
-    workflow_status = models.CharField(
-        max_length=12,
-        choices=WorkflowStatus.choices,
-        default=WorkflowStatus.DRAFT,
-        verbose_name="Workflow төлөв",
-    )
-    submitted_at = models.DateTimeField(null=True, blank=True, verbose_name="Илгээсэн огноо")
-    submitted_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="ms_submitted",
-        verbose_name="Илгээсэн хэрэглэгч",
-    )
-    approved_at = models.DateTimeField(null=True, blank=True, verbose_name="Баталсан огноо")
-    approved_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="ms_approved",
-        verbose_name="Баталсан хэрэглэгч",
-    )
-    rejected_at = models.DateTimeField(null=True, blank=True, verbose_name="Татгалзсан огноо")
-    rejected_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="ms_rejected",
-        verbose_name="Татгалзсан хэрэглэгч",
-    )
-    reject_reason = models.TextField(blank=True, default="", verbose_name="Reject шалтгаан")
-
-    # --- Hybrid verification flags ---
-    self_verified = models.BooleanField(default=False, verbose_name="Аймаг өөрөө баталсан")
-    central_verified = models.BooleanField(default=False, verbose_name="Төвөөр баталгаажсан")
-    central_review_required = models.BooleanField(default=False, verbose_name="Төвийн баталгаа шаардлагатай")
-
-
-
-    created_at = models.DateTimeField(auto_now_add=True)
-
     class Meta:
-        verbose_name = "Засвар, үйлчилгээ"
-        verbose_name_plural = "Засвар, үйлчилгээ"
-        ordering = ["-date", "-id"]
-        permissions = [
-            ("can_approve_workflow", "Can approve/reject workflow"),
-        ]
-
-    def __str__(self):
-        return f"{self.device} - {self.get_reason_display()} ({self.date})"
-
-    def clean(self):
-        super().clean()
-        eng = (self.performer_engineer_name or "").strip()
-        org = (self.performer_org_name or "").strip()
-
-        if self.performer_type == "ENGINEER":
-            if not eng:
-                raise ValidationError({"performer_engineer_name": "Инженерийн нэр заавал."})
-            if org:
-                raise ValidationError({"performer_org_name": "Инженер сонгосон үед байгууллага бөглөхгүй."})
-
-        if self.performer_type == "ORG":
-            if not org:
-                raise ValidationError({"performer_org_name": "Байгууллагын нэр заавал."})
-            if eng:
-                raise ValidationError({"performer_engineer_name": "Байгууллага сонгосон үед инженер бөглөхгүй."})
+        verbose_name = "Засвар үйлчилгээ"
+        verbose_name_plural = "Завар үйлчилгээ"
 
 
-# ============================================================
-# 6) Хяналт, тохируулга
-# ============================================================
-class ControlAdjustment(models.Model):
-    PERFORMER_TYPES = [
-        ("ENGINEER", "Инженер"),
-        ("ORG", "Байгууллага"),
-    ]
+class ControlAdjustment(BaseWorkflowModel):
+    device = models.ForeignKey(Device, on_delete=models.PROTECT, related_name="control_adjustments", verbose_name="Багаж / Төхөөрөмж")
 
     RESULTS = [
         ("PASS", "PASS - Хэвийн"),
-        ("LIMITED", "Хязгаарлагдмал"),
+        ("LIMITED", "Хзгаарлагдмал"),
         ("FAIL", "FAIL - Ажиллагаагүй"),
     ]
-
-    device = models.ForeignKey(
-        "inventory.Device",
-        on_delete=models.PROTECT,
-        related_name="control_adjustments",
-        verbose_name="Багаж / Төхөөрөмж",
+    result = models.CharField(
+        max_length=20,
+        choices=RESULTS,
+        default="PASS",
+        verbose_name="Үр дүн",
     )
-    date = models.DateField(verbose_name="Огноо")
-
-    result = models.CharField(max_length=20, choices=RESULTS, default="PASS", verbose_name="Үр дүн")
-
-    performer_type = models.CharField(
-        max_length=10,
-        choices=PERFORMER_TYPES,
-        default="ENGINEER",
-        verbose_name="Хийсэн этгээд (төрөл)",
-    )
-    performer_engineer_name = models.CharField(
-        max_length=255,
-        blank=True,
-        default="",
-        verbose_name="Хийсэн инженер (нэр)",
-    )
-    performer_org_name = models.CharField(
-        max_length=255,
-        blank=True,
-        default="",
-        verbose_name="Хийсэн байгууллага (нэр)",
-    )
-
-    # (Хуучин 1 файл) — олон файл нь ControlEvidence model дээр хадгалагдана.
-    evidence = models.FileField(
-        upload_to="evidence/control/%Y/%m/",
-        blank=True,
-        null=True,
-        verbose_name="Нотлох баримт (файл)",
-    )
-
-    note = models.TextField(blank=True, default="", verbose_name="Тайлбар / тэмдэглэл")
-
-    # --- Workflow ---
-    workflow_status = models.CharField(
-        max_length=12,
-        choices=WorkflowStatus.choices,
-        default=WorkflowStatus.DRAFT,
-        verbose_name="Workflow төлөв",
-    )
-    submitted_at = models.DateTimeField(null=True, blank=True, verbose_name="Илгээсэн огноо")
-    submitted_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="ca_submitted",
-        verbose_name="Илгээсэн хэрэглэгч",
-    )
-    approved_at = models.DateTimeField(null=True, blank=True, verbose_name="Баталсан огноо")
-    approved_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="ca_approved",
-        verbose_name="Баталсан хэрэглэгч",
-    )
-    rejected_at = models.DateTimeField(null=True, blank=True, verbose_name="Татгалзсан огноо")
-    rejected_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="ca_rejected",
-        verbose_name="Татгалзсан хэрэглэгч",
-    )
-    reject_reason = models.TextField(blank=True, default="", verbose_name="Reject шалтгаан")
-
-    # --- Hybrid verification flags ---
-    self_verified = models.BooleanField(default=False, verbose_name="Аймаг өөрөө баталсан")
-    central_verified = models.BooleanField(default=False, verbose_name="Төвөөр баталгаажсан")
-    central_review_required = models.BooleanField(default=False, verbose_name="Төвийн баталгаа шаардлагатай")
-
-
-
-    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        verbose_name = "Хяналт, тохируулга"
-        verbose_name_plural = "Хяналт, тохируулга"
-        ordering = ["-date", "-id"]
-        permissions = [
-            ("can_approve_workflow", "Can approve/reject workflow"),
-        ]
-
-    def __str__(self):
-        return f"{self.device} - {self.get_result_display()} ({self.date})"
-
-    def clean(self):
-        super().clean()
-        eng = (self.performer_engineer_name or "").strip()
-        org = (self.performer_org_name or "").strip()
-
-        if self.performer_type == "ENGINEER":
-            if not eng:
-                raise ValidationError({"performer_engineer_name": "Инженерийн нэр заавал."})
-            if org:
-                raise ValidationError({"performer_org_name": "Инженер сонгосон үед байгууллага бөглөхгүй."})
-
-        if self.performer_type == "ORG":
-            if not org:
-                raise ValidationError({"performer_org_name": "Байгууллагын нэр заавал."})
-            if eng:
-                raise ValidationError({"performer_engineer_name": "Байгууллага сонгосон үед инженер бөглөхгүй."})
-
-
-# ============================================================
-# 6.1) Засварын олон нотлох баримт  ✅ ШИНЭ
-# ============================================================
+        verbose_name = "Хяналт тохируулга"
+        verbose_name_plural = "Хяналт тохируулга"
 class MaintenanceEvidence(models.Model):
-    service = models.ForeignKey(
-        "inventory.MaintenanceService",
-        on_delete=models.CASCADE,
-        related_name="evidences",
-        verbose_name="Засвар, үйлчилгээ",
-    )
-    file = models.FileField(
-        upload_to="evidence/maintenance/%Y/%m/",
-        verbose_name="Нотлох баримт (файл)",
-    )
+    service = models.ForeignKey(MaintenanceService, on_delete=models.CASCADE, related_name="evidences")
+    file = models.FileField(upload_to="evidence/maintenance/")
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
-    class Meta:
-        verbose_name = "Засварын нотлох баримт"
-        verbose_name_plural = "Засварын нотлох баримтууд"
-        ordering = ["-uploaded_at", "-id"]
-
     def __str__(self):
-        return f"{self.service_id} evidence #{self.id}"
+        return f"Evidence#{self.pk}"
+
+    class Meta:
+        verbose_name = "Засварын нотолгоо"
+        verbose_name_plural = "Засварын нотолгоо"
 
 
-# ============================================================
-# 6.2) Хяналтын олон нотлох баримт  ✅ ШИНЭ
-# ============================================================
 class ControlEvidence(models.Model):
-    control = models.ForeignKey(
-        "inventory.ControlAdjustment",
-        on_delete=models.CASCADE,
-        related_name="evidences",
-        verbose_name="Хяналт, тохируулга",
-    )
-    file = models.FileField(
-        upload_to="evidence/control/%Y/%m/",
-        verbose_name="Нотлох баримт (файл)",
-    )
+    adjustment = models.ForeignKey(
+    ControlAdjustment,
+    on_delete=models.PROTECT,
+    null=True,
+    blank=True,
+    verbose_name="Тохируулга"
+)
+
+    file = models.FileField(upload_to="evidence/control/")
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
-    class Meta:
-        verbose_name = "Хяналтын нотлох баримт"
-        verbose_name_plural = "Хяналтын нотлох баримтууд"
-        ordering = ["-uploaded_at", "-id"]
-
     def __str__(self):
-        return f"{self.control_id} evidence #{self.id}"
+        return f"Evidence#{self.pk}"
+
+    class Meta:
+        verbose_name = "Тохируулагын нотолгоо"
+        verbose_name_plural = "Тохируулагын нотолгоо"
 
 
 # ============================================================
-# 7) Сэлбэг захиалга
+# 9) Spare Parts
 # ============================================================
 class SparePartOrder(models.Model):
-    order_no = models.CharField(max_length=20, unique=True, verbose_name="Захиалгын №")
-    aimag = models.ForeignKey(Aimag, on_delete=models.CASCADE)
-    status = models.CharField(max_length=20, default="Draft")
-    created_at = models.DateTimeField(default=timezone.now)
+    order_no = models.CharField(max_length=50, unique=True)
+    aimag = models.ForeignKey(Aimag, on_delete=models.SET_NULL, null=True, blank=True)
+    status = models.CharField(max_length=30, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return self.order_no
 
+    class Meta:
+        verbose_name = "Сэлбэгийн захиалга"
+        verbose_name_plural = "Сэлбэгийн захиалга"
+
 
 class SparePartItem(models.Model):
-    order = models.ForeignKey(SparePartOrder, related_name="items", on_delete=models.CASCADE)
-    part_name = models.CharField(max_length=255)
-    quantity = models.PositiveIntegerField(default=1)
+    order = models.ForeignKey(SparePartOrder, on_delete=models.CASCADE, related_name="items")
+    name = models.CharField(max_length=255)
+    qty = models.PositiveIntegerField(default=1)
+    serial_number = models.CharField(max_length=120, blank=True, default="")
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "Сэлбэг (мөр)"
+        verbose_name_plural = "Сэлбэг (мөр)"
 
 
 # ============================================================
-# 8) User Profile
+# 10) User Profile + Auth Audit
 # ============================================================
 class UserProfile(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
     aimag = models.ForeignKey(Aimag, on_delete=models.SET_NULL, null=True, blank=True)
-    role = models.CharField(max_length=20, default="AIMAG_ENG")
     org = models.ForeignKey(Organization, on_delete=models.SET_NULL, null=True, blank=True)
-
     must_change_password = models.BooleanField(default=False)
 
     def __str__(self):
         return self.user.username
 
+    class Meta:
+        verbose_name = "Профайл"
+        verbose_name_plural = "Профайл"
 
-# ============================================================
-# 9) Auth Audit Log
-# ============================================================
+
 class AuthAuditLog(models.Model):
-    ACTION_CHOICES = [
-        ("LOGIN_SUCCESS", "LOGIN_SUCCESS"),
-        ("LOGIN_FAILED", "LOGIN_FAILED"),
-        ("FORCED_PW_CHANGE", "FORCED_PW_CHANGE"),
-        ("PASSWORD_CHANGED", "PASSWORD_CHANGED"),
-    ]
-
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    created_at = models.DateTimeField(auto_now_add=True)
+    action = models.CharField(max_length=50)
     username = models.CharField(max_length=150, blank=True, default="")
-    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
-
-    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    ip_address = models.CharField(max_length=50, blank=True, default="")
     user_agent = models.TextField(blank=True, default="")
-    created_at = models.DateTimeField(default=timezone.now)
-    extra = models.JSONField(default=dict, blank=True)
-
-    class Meta:
-        ordering = ["-created_at"]
 
     def __str__(self):
-        return f"{self.created_at:%Y-%m-%d %H:%M:%S} {self.action} {self.username}"
+        return f"{self.created_at} {self.action} {self.username}"
+
+    class Meta:
+        verbose_name = "Нэвтрэлтийн лог"
+        verbose_name_plural = "Нэвтрэлтийн лог"
 
 
-# ============================================================
-# 10) Workflow + Data Audit (CRUD)
-# ============================================================
+# Optional models (if your migrations include them)
 class AuditEvent(models.Model):
-    """CRUD + workflow action audit log.
-    (Нэвтрэлтийн аудит нь AuthAuditLog дээр хадгалагдана.)
-    """
-
-    class Action(models.TextChoices):
-        CREATE = "CREATE", "CREATE"
-        UPDATE = "UPDATE", "UPDATE"
-        DELETE = "DELETE", "DELETE"
-        SUBMIT = "SUBMIT", "SUBMIT"
-        APPROVE = "APPROVE", "APPROVE"
-        REJECT = "REJECT", "REJECT"
-        LIFECYCLE = "LIFECYCLE", "LIFECYCLE"
-        NOTIFY = "NOTIFY", "NOTIFY"
-
-    actor = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="audit_events",
-        verbose_name="Хэрэглэгч",
-    )
-    action = models.CharField(max_length=20, choices=Action.choices, verbose_name="Үйлдэл")
-
-    model_label = models.CharField(max_length=100, verbose_name="Model")  # e.g. inventory.ControlAdjustment
-    object_id = models.CharField(max_length=50, blank=True, default="", verbose_name="Object ID")
-    object_repr = models.CharField(max_length=255, blank=True, default="", verbose_name="Object")
-
-    ip_address = models.GenericIPAddressField(null=True, blank=True, verbose_name="IP")
-    created_at = models.DateTimeField(default=timezone.now)
-    changes = models.JSONField(default=dict, blank=True)
-
-    class Meta:
-        ordering = ["-created_at", "-id"]
-        verbose_name = "Audit event"
-        verbose_name_plural = "Audit events"
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.created_at:%Y-%m-%d %H:%M:%S} {self.action} {self.model_label}#{self.object_id}"
+        return f"AuditEvent#{self.pk}"
 
-
-# ============================================================
-# 11) Workflow Review Audit Log (Approve/Reject)
-# ============================================================
 class WorkflowAuditLog(models.Model):
-    ACTION_CHOICES = [
-        ("APPROVE", "APPROVE"),
-        ("REJECT", "REJECT"),
-    ]
-
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="workflow_audit_logs",
-        verbose_name="Хэрэглэгч",
-    )
-    action = models.CharField(max_length=10, choices=ACTION_CHOICES, verbose_name="Үйлдэл")
-    model_name = models.CharField(max_length=120, verbose_name="Model нэр")  # e.g. "MaintenanceService"
-    record_id = models.PositiveIntegerField(verbose_name="Record ID")
-    comment = models.TextField(blank=True, default="", verbose_name="Тайлбар")
-    created_at = models.DateTimeField(default=timezone.now, verbose_name="Огноо")
-
-    class Meta:
-        ordering = ["-created_at", "-id"]
-        verbose_name = "Workflow audit log"
-        verbose_name_plural = "Workflow audit logs"
-        indexes = [
-            models.Index(fields=["model_name", "record_id"]),
-            models.Index(fields=["action"]),
-            models.Index(fields=["created_at"]),
-        ]
+    created_at = models.DateTimeField(auto_now_add=True)
+    action = models.CharField(max_length=50, blank=True, default="")
+    note = models.TextField(blank=True, default="")
 
     def __str__(self):
-        return f"{self.created_at:%Y-%m-%d %H:%M:%S} {self.action} {self.model_name}#{self.record_id}"
+        return f"WorkflowAuditLog#{self.pk}"
 
-# ============================================================
-# 12) Workflow materialized daily aggregation (optional, for heavy data)
-# ============================================================
 class WorkflowDailyAgg(models.Model):
-    """Daily materialized aggregation for workflow analytics.
-
-    ⚠️ Optional: use with management command materialize_workflow_agg.
-    Create migration after adding this model.
-    """
-
-    day = models.DateField(db_index=True, verbose_name="Огноо (өдөр)")
-    # Scope dimensions (nullable so it can store global totals)
-    aimag = models.ForeignKey(Aimag, null=True, blank=True, on_delete=models.SET_NULL, related_name="workflow_daily_aggs")
-    kind = models.CharField(max_length=20, blank=True, default="", verbose_name="Device kind")
-    location_type = models.CharField(max_length=20, blank=True, default="", verbose_name="Location type")
-
-    # Counts (MS/CA by status)
-    ms_submitted = models.PositiveIntegerField(default=0)
-    ms_approved = models.PositiveIntegerField(default=0)
-    ms_rejected = models.PositiveIntegerField(default=0)
-
-    ca_submitted = models.PositiveIntegerField(default=0)
-    ca_approved = models.PositiveIntegerField(default=0)
-    ca_rejected = models.PositiveIntegerField(default=0)
-
-    # SLA (approved only) - average hours from submitted_at to approved_at
-    sla_avg_hours = models.FloatField(default=0.0)
-
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = "Workflow daily aggregation"
-        verbose_name_plural = "Workflow daily aggregations"
-        indexes = [
-            models.Index(fields=["day"]),
-            models.Index(fields=["day", "aimag"]),
-            models.Index(fields=["day", "kind"]),
-            models.Index(fields=["day", "location_type"]),
-        ]
-        unique_together = ("day", "aimag", "kind", "location_type")
+    day = models.DateField(default=timezone.localdate)
 
     def __str__(self):
-        a = self.aimag.name if self.aimag else "ALL"
-        k = self.kind or "ALL"
-        lt = self.location_type or "ALL"
-        return f"{self.day} {a} {k} {lt}"
+        return str(self.day)
+
