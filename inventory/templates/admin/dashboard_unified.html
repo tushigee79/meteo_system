@@ -1,0 +1,277 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block extrastyle %}
+{{ block.super }}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+<style>
+  :root {
+    --primary: #2563eb; --success: #10b981; --warning: #f59e0b;
+    --danger: #ef4444; --gray: #64748b; --bg-light: #f8fafc;
+  }
+  body { background-color: var(--bg-light); }
+  .wrap { padding: 20px; font-family: 'Inter', -apple-system, sans-serif; }
+
+  .topbar {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 24px; background: #fff; padding: 16px 24px;
+    border-radius: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+  .filter-group { display: flex; gap: 12px; align-items: center; }
+  input[type="date"] { padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; outline: none; }
+
+  .btn-primary { background: var(--primary); color: white !important; border: none; }
+  .btn-outline { background: #fff; color: var(--gray); border: 1px solid #e2e8f0; text-decoration: none; }
+  .btn-common { padding: 8px 16px; border-radius: 8px; font-weight: 500; cursor: pointer; transition: 0.2s; display: inline-flex; align-items: center; gap: 6px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 24px; }
+  .card {
+    background: #fff; padding: 20px; border-radius: 16px;
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid rgba(0,0,0,0.05);
+  }
+  .card .k { font-size: 14px; color: var(--gray); font-weight: 500; display: flex; align-items: center; gap: 8px; }
+  .card .v { font-size: 28px; font-weight: 700; margin-top: 8px; }
+  .status-border-success { border-left: 4px solid var(--success); }
+  .status-border-warning { border-left: 4px solid var(--warning); }
+  .status-border-danger { border-left: 4px solid var(--danger); }
+
+  .grid-main { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 24px; margin-bottom: 24px; }
+  .chart-container { background: #fff; padding: 20px; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+  .chart-title { font-size: 16px; font-weight: 700; margin-bottom: 12px; display:flex; align-items:center; gap:8px; }
+  .chart { height: 320px; }
+  #map { height: 480px; border-radius: 12px; overflow: hidden; }
+
+  .badge-danger {
+    background: var(--danger);
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    margin-left: 8px;
+  }
+  .pulse-danger {
+    position: relative;
+    border: 1px solid rgba(239,68,68,0.35);
+  }
+  .pulse-danger::after {
+    content: "";
+    position: absolute;
+    left: 18px;
+    top: 18px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--danger);
+    opacity: 0.85;
+    animation: pulseRing 1.6s infinite;
+  }
+  @keyframes pulseRing {
+    0% { transform: scale(0.9); opacity: 0.75; }
+    70% { transform: scale(3.2); opacity: 0.0; }
+    100% { transform: scale(3.2); opacity: 0.0; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <div class="topbar">
+    <div>
+      <div style="font-size:18px;font-weight:800;">{{ title }}</div>
+      <div style="color:var(--gray);font-size:13px;">KPI + Workflow + Map + Verification</div>
+    </div>
+    <form method="get" class="filter-group">
+      <input type="date" name="date_from" value="{{ date_from|date:'Y-m-d' }}">
+      <input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}">
+      <button class="btn-common btn-primary" type="submit"><i class="fas fa-filter"></i> Шүүх</button>
+      <a class="btn-common btn-outline" href=""><i class="fas fa-rotate-right"></i> Reset</a>
+    </form>
+  </div>
+
+  <div class="cards">
+    <div class="card status-border-success"><div class="k"><i class="fas fa-map-marker-alt"></i> Байршил</div><div class="v">{{ total_locations }}</div></div>
+    <div class="card status-border-success"><div class="k"><i class="fas fa-tools"></i> Нийт багаж</div><div class="v">{{ total_devices }}</div></div>
+
+    <div class="card status-border-danger {% if expired_count|default:0|add:0 > 0 %}pulse-danger{% endif %}">
+      <div class="k"><i class="fas fa-calendar-times"></i> Калибровка хэтэрсэн
+        {% if expired_count|default:0|add:0 > 0 %}<span class="badge-danger">ALERT</span>{% endif %}
+      </div>
+      <div class="v">{{ expired_count|default:0 }}</div>
+    </div>
+
+    <div class="card status-border-warning"><div class="k"><i class="fas fa-clock"></i> Хүлээгдэж буй</div><div class="v">{{ pending_total_items }}</div></div>
+    <div class="card status-border-danger"><div class="k"><i class="fas fa-exclamation-triangle"></i> Эвдрэлтэй</div><div class="v">{{ broken_locations }}</div></div>
+  </div>
+
+  <div class="grid-main">
+    <div class="chart-container">
+      <div class="chart-title">Багажийн төлөв <i class="fas fa-chart-pie"></i></div>
+      <div id="chartStatus" class="chart"></div>
+    </div>
+
+    <div class="chart-container">
+      <div class="chart-title">Ажлын урсгал <i class="fas fa-tasks"></i></div>
+      <div id="chartWorkflow" class="chart"></div>
+    </div>
+
+    <div class="chart-container">
+      <div class="chart-title">Калибровка дуусах төлөв <i class="fas fa-chart-pie"></i></div>
+      <div id="verifPie" class="chart"></div>
+      <div style="font-size:12px;color:var(--gray);margin-top:6px;">Slice дарвал багажийн жагсаалт filter-лэгдэж нээгдэнэ.</div>
+    </div>
+  </div>
+
+  <div class="chart-container">
+    <div class="chart-title"><i class="fas fa-map"></i> Интерактив газрын зураг</div>
+    <div id="map"></div>
+  </div>
+</div>
+
+<div class="card mt-4">
+  <div class="card-header">
+    <h3 class="card-title"><i class="fas fa-chart-line"></i> Калибровкийн трэнд (90 хоног)</h3>
+  </div>
+  <div class="card-body">
+    <div id="verifTrendChart" style="height: 300px;"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+
+<script>
+    const trendData = JSON.parse('{{ echarts_verif_trend_json|safe }}');
+    const vtEl = document.getElementById('verifTrendChart');
+    if (vtEl && trendData && trendData.axis) {
+      const vtChart = echarts.init(vtEl);
+      vtChart.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['Хугацаа хэтэрсэн', '30 хоногт дуусах', '90 хоногт дуусах'] },
+        xAxis: { type: 'category', data: trendData.axis },
+        yAxis: { type: 'value' },
+        series: [
+          { name: 'Хугацаа хэтэрсэн', type: 'line', data: trendData.expired || [], smooth: true },
+          { name: '30 хоногт дуусах', type: 'line', data: trendData.due30 || [], smooth: true },
+          { name: '90 хоногт дуусах', type: 'line', data: trendData.due90 || [], smooth: true }
+        ]
+      });
+    }
+</script>
+
+{{ echarts_status_json|json_script:"status-data" }}
+{{ echarts_workflow_json|json_script:"workflow-data" }}
+{{ locations_json|json_script:"points-data" }}
+{{ verif_buckets_json|json_script:"verif-buckets-data" }}
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+  // Data load
+  const statusSeries = JSON.parse(document.getElementById('status-data').textContent || "[]");
+  const wf = JSON.parse(document.getElementById('workflow-data').textContent || '{"axis":[], "ms":[], "ca":[]}');
+  const points = JSON.parse(document.getElementById('points-data').textContent || "[]");
+
+  // Verification Pie (Expired / Due<=30 / Due<=90)
+  const vb = JSON.parse(document.getElementById('verif-buckets-data').textContent || '{"expired":0,"due30":0,"due90":0}');
+  const vpEl = document.getElementById("verifPie");
+  if (vpEl) {
+    const vp = echarts.init(vpEl);
+    const pieData = [
+      { name: "Expired", value: vb.expired || 0, key: "expired" },
+      { name: "Due ≤30", value: vb.due30 || 0, key: "due30" },
+      { name: "Due ≤90", value: vb.due90 || 0, key: "due90" },
+    ];
+    vp.setOption({
+      tooltip: { trigger: 'item', formatter: '{b}: <b>{c}</b> ({d}%)' },
+      series: [{
+        type: 'pie',
+        radius: ['40%', '70%'],
+        avoidLabelOverlap: true,
+        label: { show: true, formatter: '{b}: {c}' },
+        data: pieData
+      }]
+    });
+
+    // click -> open Device changelist with date filters (dynamic field)
+    const baseUrl = "{{ device_changelist_url|escapejs }}";
+    const field = "{{ verif_field|escapejs }}";
+    const today = "{{ today_iso|escapejs }}";
+    const d30 = "{{ due30_iso|escapejs }}";
+    const d90 = "{{ due90_iso|escapejs }}";
+    const d30p1 = "{{ due30_plus1_iso|escapejs }}";
+
+    function goFilter(key) {
+      let url = baseUrl;
+      if (!url.includes("?")) url += "?";
+
+      if (key === "expired") {
+        url += `${field}__lt=` + encodeURIComponent(today);
+      } else if (key === "due30") {
+        url += `${field}__range=` + encodeURIComponent(today + "," + d30);
+      } else if (key === "due90") {
+        url += `${field}__range=` + encodeURIComponent(d30p1 + "," + d90);
+      }
+      window.location.href = url;
+    }
+
+    vp.on('click', function (params) {
+      const k = (params && params.data && params.data.key) ? params.data.key : null;
+      if (k) goFilter(k);
+    });
+  }
+
+  // Status Pie Chart
+  const st = echarts.init(document.getElementById("chartStatus"));
+  st.setOption({
+    color: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#6366f1'],
+    tooltip: { trigger: 'item', formatter: '{b}: <b>{c}</b> ({d}%)' },
+    series: [{
+      type: 'pie', radius: ['40%', '70%'], avoidLabelOverlap: true,
+      label: { show: true, formatter: '{b}: {c}' },
+      data: statusSeries.map(x => ({ name: x.name, value: x.value, url: x.url }))
+    }]
+  });
+  st.on('click', (p) => { if (p && p.data && p.data.url) window.location.href = p.data.url; });
+
+  // Workflow Chart
+  const wfChart = echarts.init(document.getElementById("chartWorkflow"));
+  wfChart.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['Maintenance', 'Control'] },
+    xAxis: { type: 'category', data: wf.axis || [] },
+    yAxis: { type: 'value' },
+    series: [
+      { name: 'Maintenance', type: 'bar', stack: 'wf', data: wf.ms || [] },
+      { name: 'Control', type: 'bar', stack: 'wf', data: wf.ca || [] }
+    ]
+  });
+
+  // Leaflet map
+  const map = L.map('map').setView([47.918, 106.917], 5);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+
+  function markerColor(p) {
+    if ((p.pending_total || 0) > 0) return "#f59e0b";
+    if (p.status === "BROKEN") return "#ef4444";
+    if (p.status === "EMPTY") return "#64748b";
+    return "#10b981";
+  }
+
+  points.forEach(p => {
+    const c = markerColor(p);
+    const m = L.circleMarker([p.lat, p.lon], { radius: 7, color: c, weight: 2, fillColor: c, fillOpacity: 0.9 }).addTo(map);
+    const html = `
+      <div style="font-weight:700;margin-bottom:6px;">${p.name}</div>
+      <div style="margin-bottom:6px;">Pending: <b>${p.pending_total || 0}</b></div>
+      <div style="display:flex;gap:8px;">
+        <a href="${p.loc_admin_url}">Location</a>
+        <a href="${p.device_list_url}">Devices</a>
+      </div>
+    `;
+    m.bindPopup(html);
+  });
+</script>
+{% endblock %}

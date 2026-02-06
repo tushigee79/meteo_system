@@ -68,8 +68,3 @@ Thumbs.db
 *_snippet.py
 views_*_snippet.txt
 
-
-# local backups
-admin1.py
-inventory/admin1.py
-

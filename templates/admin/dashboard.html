@@ -7,6 +7,7 @@
         .kpi-card { transition: transform 0.2s; }
         .kpi-card:hover { transform: scale(1.05); }
         h5 { font-weight: bold; color: #444; margin-bottom: 15px; }
+        .chart-container { position: relative; height: 300px; }
     </style>
 {% endblock %}
 
@@ -39,60 +40,69 @@
                 <p class="mb-0">Ашиглалтын хугацаа дууссан</p>
             </div>
         </div>
-    
-<!-- Calibration / Verification warnings -->
-<div class="row mb-4">
-    <div class="col-md-3">
-        <a href="/django-admin/inventory/device/?verification=expired" style="text-decoration:none;">
-            <div class="card kpi-card bg-danger text-white p-4 text-center shadow">
-                <h2 class="font-weight-bold">{{ calib_expired }}</h2>
-                <p class="mb-0">Калибровка дууссан</p>
-            </div>
-        </a>
     </div>
-    <div class="col-md-3">
-        <a href="/django-admin/inventory/device/?verification=due_30" style="text-decoration:none;">
-            <div class="card kpi-card bg-warning text-dark p-4 text-center shadow">
-                <h2 class="font-weight-bold">{{ calib_due_30 }}</h2>
-                <p class="mb-0">30 хоногт дуусах</p>
-            </div>
-        </a>
-    </div>
-    <div class="col-md-3">
-        <a href="/django-admin/inventory/device/?verification=due_90" style="text-decoration:none;">
-            <div class="card kpi-card bg-info text-white p-4 text-center shadow">
-                <h2 class="font-weight-bold">{{ calib_due_90 }}</h2>
-                <p class="mb-0">90 хоногт дуусах</p>
-            </div>
-        </a>
-    </div>
-    <div class="col-md-3">
-        <a href="/django-admin/inventory/device/?verification=unknown" style="text-decoration:none;">
-            <div class="card kpi-card bg-secondary text-white p-4 text-center shadow">
-                <h2 class="font-weight-bold">{{ calib_unknown }}</h2>
-                <p class="mb-0">Огноо бүрдээгүй</p>
-            </div>
-        </a>
-    </div>
-</div>
 
-</div>
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <a href="/django-admin/inventory/device/?verification=expired" style="text-decoration:none;">
+                <div class="card kpi-card bg-danger text-white p-4 text-center shadow">
+                    <h2 class="font-weight-bold">{{ calib_expired }}</h2>
+                    <p class="mb-0">Калибровка дууссан</p>
+                </div>
+            </a>
+        </div>
+        <div class="col-md-3">
+            <a href="/django-admin/inventory/device/?verification=due_30" style="text-decoration:none;">
+                <div class="card kpi-card bg-warning text-dark p-4 text-center shadow">
+                    <h2 class="font-weight-bold">{{ calib_due_30 }}</h2>
+                    <p class="mb-0">30 хоногт дуусах</p>
+                </div>
+            </a>
+        </div>
+        <div class="col-md-3">
+            <a href="/django-admin/inventory/device/?verification=due_90" style="text-decoration:none;">
+                <div class="card kpi-card bg-info text-white p-4 text-center shadow">
+                    <h2 class="font-weight-bold">{{ calib_due_90 }}</h2>
+                    <p class="mb-0">90 хоногт дуусах</p>
+                </div>
+            </a>
+        </div>
+        <div class="col-md-3">
+            <a href="/django-admin/inventory/device/?verification=unknown" style="text-decoration:none;">
+                <div class="card kpi-card bg-secondary text-white p-4 text-center shadow">
+                    <h2 class="font-weight-bold">{{ calib_unknown }}</h2>
+                    <p class="mb-0">Огноо бүрдээгүй</p>
+                </div>
+            </a>
+        </div>
+    </div>
 
     <div class="row">
-        <div class="col-md-5">
+        <div class="col-md-4">
             <div class="card p-4 shadow h-100">
                 <h5 class="text-center">Багажнуудын ашиглалтын төлөв</h5>
-                <div style="position: relative; height:300px;">
+                <div class="chart-container">
                     <canvas id="statusChart"></canvas>
                 </div>
             </div>
         </div>
-        <div class="col-md-7">
+
+        <div class="col-md-4">
             <div class="card p-4 shadow h-100">
-                <h5 class="text-center">Хамгийн их эвдрэлтэй аймгууд (Top 10)</h5>
-                <div style="position: relative; height:300px;">
+                <h5 class="text-center">Эвдрэлтэй аймгууд (Top 10)</h5>
+                <div class="chart-container">
                     <canvas id="aimagChart"></canvas>
                 </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card p-4 shadow h-100">
+                <h5 class="text-center">Калибровка дуусах төлөв</h5>
+                <div class="chart-container">
+                    <canvas id="calibrationChart"></canvas>
+                </div>
+                <p class="small text-muted mt-3 text-center">График дээр дарж жагсаалтыг шүүнэ үү.</p>
             </div>
         </div>
     </div>
@@ -101,11 +111,8 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
-    // 1. Төлөвийн график (Doughnut Chart)
-    // views.py-ээс ирсэн 'status_stats_json' өгөгдлийг унших
+    // 1. Төлөвийн график (Doughnut)
     const statusRawData = JSON.parse('{{ status_stats_json|safe }}');
-    
-    // Төлөвийн нэрсийг Монголоор харуулах хөрвүүлэлт
     const statusLabels = {
         'Active': 'Ашиглагдаж буй',
         'Broken': 'Эвдрэлтэй',
@@ -126,20 +133,18 @@
         },
         options: {
             maintainAspectRatio: false,
-            plugins: {
-                legend: { position: 'bottom' }
-            }
+            plugins: { legend: { position: 'bottom' } }
         }
     });
 
-    // 2. Аймгуудын график (Bar Chart)
+    // 2. Аймгуудын график (Bar)
     const aimagData = JSON.parse('{{ aimag_stats_json|safe }}');
     new Chart(document.getElementById('aimagChart'), {
         type: 'bar',
         data: {
             labels: aimagData.map(item => item.name),
             datasets: [{
-                label: 'Эвдрэлтэй байгаа багажны тоо',
+                label: 'Багажны тоо',
                 data: aimagData.map(item => item.broken_count),
                 backgroundColor: '#dc3545',
                 borderRadius: 5
@@ -147,14 +152,43 @@
         },
         options: {
             maintainAspectRatio: false,
-            scales: {
-                y: { 
-                    beginAtZero: true,
-                    ticks: { stepSize: 1 }
+            scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+            plugins: { legend: { display: false } }
+        }
+    });
+
+    // 3. Калибровкын график (Doughnut - Шинэ)
+    const calibRawData = JSON.parse('{{ calib_stats_json|safe }}');
+    const calibLabels = {
+        'Expired': 'Хугацаа дууссан',
+        'Due30': '30 хоногт дуусах',
+        'Valid': 'Хэвийн'
+    };
+
+    new Chart(document.getElementById('calibrationChart'), {
+        type: 'doughnut',
+        data: {
+            labels: calibRawData.map(item => calibLabels[item.status] || item.status),
+            datasets: [{
+                data: calibRawData.map(item => item.count),
+                backgroundColor: ['#dc3545', '#ffc107', '#28a745'],
+                borderWidth: 2
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } },
+            onClick: (evt, item) => {
+                if (item.length > 0) {
+                    const index = item[0].index;
+                    const status = calibRawData[index].status;
+                    const urls = {
+                        'Expired': '/django-admin/inventory/device/?verification=expired',
+                        'Due30': '/django-admin/inventory/device/?verification=due_30',
+                        'Valid': '/django-admin/inventory/device/?verification=valid'
+                    };
+                    if (urls[status]) window.location.href = urls[status];
                 }
-            },
-            plugins: {
-                legend: { display: false }
             }
         }
     });

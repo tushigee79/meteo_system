@@ -1,4 +1,3 @@
-# inventory/admin.py (production-ready) - 2026-01-31
 from __future__ import annotations
 
 import io
@@ -6,7 +5,7 @@ import json
 import logging
 import uuid
 import zipfile
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import Any, Dict, Optional
 
 from django import forms
@@ -15,22 +14,24 @@ from django.contrib.admin import AdminSite
 from django.core.cache import cache
 from django.core.files.base import ContentFile
 from django.db.models import Count, Q, QuerySet
-from django.http import FileResponse, HttpRequest, HttpResponse, JsonResponse
+from django.http import FileResponse, HttpRequest, HttpResponse, JsonResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.text import slugify
 
+
 from . import views_admin_workflow as wf
-from .device_passport_pdf import generate_device_passport_pdf
+from . import reports_hub_compat as rhc
+from . import admin_dashboard as adash
+from . import views_admin as vadmin
+from .models import Location
 from .pdf_passport import generate_device_passport_pdf_bytes
 from .reports_hub_compat import (
-
     reports_hub_view,
     reports_chart_json,
     reports_sums_by_aimag,
-    reports_export_csv,  # legacy (devices)
     reports_export_devices_csv,
     reports_export_locations_csv,
     reports_export_maintenance_csv,
@@ -40,6 +41,19 @@ from .reports_hub_compat import (
     reports_export_auth_audit_csv,
     reports_table_json,
 )
+from .views_dashboard_general import general_dashboard_view
+
+# Dashboard / Admin pages views (PATCH 3.2 imports)
+# Dashboard pages (HTML) - keep in views_admin to avoid import loops
+from . import views_admin as vadmin
+
+# JSON/APIs
+from . import admin_dashboard as adash
+
+# Workflow
+from . import views_admin_workflow as wf
+
+
 from .models import (
     Aimag,
     SumDuureg,
@@ -58,99 +72,26 @@ from .models import (
     AuthAuditLog,
 )
 
-# Optional model (if exists in your branch)
-try:
-    from .models import AuditEvent  # type: ignore
-except Exception:  # pragma: no cover
-    AuditEvent = None  # type: ignore
-
 logger = logging.getLogger(__name__)
 
+KIND_TO_LOCATION_TYPE = {
+    "WEATHER": ["WEATHER", "METEO"],
+    "HYDRO": ["HYDRO"],
+    "AWS": ["AWS"],
+    "RADAR": ["RADAR"],
+    "AEROLOGY": ["AEROLOGY"],
+    "AGRO": ["AGRO"],
+    "ETALON": ["ETALON"],
+    "OTHER": ["OTHER"],
+}
+
+try:
+    from .models import AuditEvent  # type: ignore
+except Exception:
+    AuditEvent = None
 
 # ============================================================
-# QR Actions (lazy-import qrcode)
-# ============================================================
-
-@admin.action(description="🔳 QR үүсгэх / шинэчлэх")
-def generate_qr(modeladmin, request: HttpRequest, queryset: QuerySet):
-    """Selected device-үүдэд QR token + зураг (PNG) үүсгэнэ/шинэчилнэ.
-
-    ⚠️ qrcode сан суусан байх ёстой:
-        pip install qrcode[pil]
-    """
-    try:
-        import qrcode  # type: ignore
-        from qrcode.constants import ERROR_CORRECT_M  # type: ignore
-    except Exception:
-        modeladmin.message_user(
-            request,
-            "QR үүсгэхэд шаардлагатай 'qrcode[pil]' сан суусангүй. "
-            "Terminal дээр: pip install qrcode[pil]",
-            level=messages.ERROR,
-        )
-        return
-
-    for d in queryset:
-        # token
-        if not getattr(d, "qr_token", None):
-            d.qr_token = uuid.uuid4()
-
-        # activate flags if fields exist
-        if hasattr(d, "qr_revoked_at"):
-            d.qr_revoked_at = None
-        if hasattr(d, "qr_expires_at"):
-            d.qr_expires_at = timezone.now() + timedelta(days=365)
-
-        # URL (respects app namespace)
-        try:
-            rel = reverse("inventory:qr_device_lookup", args=[d.qr_token])
-        except Exception:
-            rel = f"/qr/device/{d.qr_token}/"
-        url = request.build_absolute_uri(rel)
-
-        qr = qrcode.QRCode(
-            version=None,
-            error_correction=ERROR_CORRECT_M,
-            box_size=10,
-            border=2,
-        )
-        qr.add_data(url)
-        qr.make(fit=True)
-
-        img = qr.make_image(fill_color="black", back_color="white")
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        buf.seek(0)
-
-        serial = (getattr(d, "serial_number", "") or "").strip()
-        base_name = slugify(serial)[:40] if serial else f"device_{d.pk}"
-        filename = f"qr/devices/{base_name}_{d.qr_token}.png"
-
-        if getattr(d, "qr_image", None) is not None:
-            d.qr_image.save(filename, ContentFile(buf.getvalue()), save=False)
-
-        # save only existing fields
-        update_fields = []
-        for f in ("qr_token", "qr_image", "qr_revoked_at", "qr_expires_at"):
-            if hasattr(d, f):
-                update_fields.append(f)
-        d.save(update_fields=update_fields or None)
-
-    modeladmin.message_user(request, f"QR үүсгэлээ: {queryset.count()} багаж", level=messages.SUCCESS)
-
-
-@admin.action(description="⛔ QR хүчингүй болгох")
-def revoke_qr(modeladmin, request: HttpRequest, queryset: QuerySet):
-    if not hasattr(Device, "qr_revoked_at"):
-        modeladmin.message_user(request, "Device дээр qr_revoked_at талбар алга байна.", level=messages.WARNING)
-        return
-    now = timezone.now()
-    queryset.update(qr_revoked_at=now)
-    modeladmin.message_user(request, f"QR хүчингүй болголоо: {queryset.count()} багаж", level=messages.SUCCESS)
-
-
-# ============================================================
-# Helpers
+# Helpers (safe)
 # ============================================================
 
 def get_ub_aimag_id() -> Optional[int]:
@@ -170,7 +111,7 @@ def get_ub_aimag_id() -> Optional[int]:
 
 
 def _get_scope(request: HttpRequest) -> Dict[str, Any]:
-    """Аймгийн инженер -> зөвхөн өөрийн аймаг (мөн УБ бол дүүргээр нарийвчилж болно)."""
+    """Аймгийн инженер -> зөвхөн өөрийн аймаг (УБ бол дүүргээр нарийвчилж болно)."""
     u = getattr(request, "user", None)
     if not u or getattr(u, "is_superuser", False):
         return {"all": True, "aimag_id": None, "sum_id": None}
@@ -196,11 +137,9 @@ def _scope_qs(request: HttpRequest, qs: QuerySet, *, aimag_field: str) -> QueryS
 
     qs = qs.filter(**{f"{aimag_field}_id": aimag_id})
 
-    # UB district narrowing (optional)
     ub_id = get_ub_aimag_id()
     sum_id = scope.get("sum_id")
     if ub_id is not None and aimag_id == ub_id and sum_id:
-        # if qs model has sum_ref_id (Location)
         if hasattr(qs.model, "sum_ref_id"):
             qs = qs.filter(sum_ref_id=sum_id)
     return qs
@@ -221,7 +160,6 @@ def _scope_location_qs(request: HttpRequest) -> QuerySet[Location]:
 
 
 def _device_next_verif_field() -> Optional[str]:
-    """Return the best field name for next verification date if it exists."""
     candidates = ("next_verification_date", "next_calibration_date", "next_verif_date")
     try:
         names = {f.name for f in Device._meta.get_fields()}
@@ -245,9 +183,8 @@ class SumDuuregByAimagFilter(admin.SimpleListFilter):
         aimag_id = (request.GET.get("aimag_ref__id__exact") or "").strip()
         if not aimag_id:
             return []
-        qs = SumDuureg.objects.filter(aimag_id=aimag_id).order_by("name")
+        qs = SumDuureg.objects.filter(aimag_ref_id=aimag_id).order_by("name")
 
-        # If model has is_ub_district and aimag is UB, show only districts; else show non-district sums.
         try:
             ub_id = get_ub_aimag_id()
             is_ub = (ub_id is not None and str(ub_id) == str(aimag_id))
@@ -308,7 +245,7 @@ class VerificationBucketFilter(admin.SimpleListFilter):
     def queryset(self, request, queryset):
         field = _device_next_verif_field()
         if not field:
-            return queryset  # no-op if field doesn't exist
+            return queryset
 
         val = self.value()
         if not val:
@@ -347,7 +284,71 @@ class VerificationBucketFilter(admin.SimpleListFilter):
 
 
 # ============================================================
-# Device Passport action (PDF / ZIP)
+# QR Actions (lazy-import qrcode)
+# ============================================================
+
+@admin.action(description="🔳 QR үүсгэх / шинэчлэх")
+def generate_qr(modeladmin, request: HttpRequest, queryset: QuerySet):
+    try:
+        import qrcode  # type: ignore
+        from qrcode.constants import ERROR_CORRECT_M  # type: ignore
+    except Exception:
+        modeladmin.message_user(
+            request,
+            "QR үүсгэхэд шаардлагатай 'qrcode[pil]' сан суусангүй. Terminal: pip install qrcode[pil]",
+            level=messages.ERROR,
+        )
+        return
+
+    for d in queryset:
+        if not getattr(d, "qr_token", None):
+            d.qr_token = uuid.uuid4()
+
+        if hasattr(d, "qr_revoked_at"):
+            d.qr_revoked_at = None
+        if hasattr(d, "qr_expires_at"):
+            d.qr_expires_at = timezone.now() + timedelta(days=365)
+
+        try:
+            rel = reverse("inventory:qr_device_lookup", args=[d.qr_token])
+        except Exception:
+            rel = f"/qr/device/{d.qr_token}/"
+        url = request.build_absolute_uri(rel)
+
+        qr = qrcode.QRCode(version=None, error_correction=ERROR_CORRECT_M, box_size=10, border=2)
+        qr.add_data(url)
+        qr.make(fit=True)
+
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+
+        serial = (getattr(d, "serial_number", "") or "").strip()
+        base_name = slugify(serial)[:40] if serial else f"device_{d.pk}"
+        filename = f"qr/devices/{base_name}_{d.qr_token}.png"
+
+        if getattr(d, "qr_image", None) is not None:
+            d.qr_image.save(filename, ContentFile(buf.getvalue()), save=False)
+
+        update_fields = [f for f in ("qr_token", "qr_image", "qr_revoked_at", "qr_expires_at") if hasattr(d, f)]
+        d.save(update_fields=update_fields or None)
+
+    modeladmin.message_user(request, f"QR үүсгэлээ: {queryset.count()} багаж", level=messages.SUCCESS)
+
+
+@admin.action(description="⛔ QR хүчингүй болгох")
+def revoke_qr(modeladmin, request: HttpRequest, queryset: QuerySet):
+    if not hasattr(Device, "qr_revoked_at"):
+        modeladmin.message_user(request, "Device дээр qr_revoked_at талбар алга байна.", level=messages.WARNING)
+        return
+    now = timezone.now()
+    queryset.update(qr_revoked_at=now)
+    modeladmin.message_user(request, f"QR хүчингүй болголоо: {queryset.count()} багаж", level=messages.SUCCESS)
+
+
+# ============================================================
+# Device Passport (PDF / ZIP)
 # ============================================================
 
 @admin.action(description="📄 Техник паспорт (PDF/ZIP)")
@@ -356,7 +357,6 @@ def download_device_passport(modeladmin, request: HttpRequest, queryset: QuerySe
     if not devices:
         return None
 
-    # ✅ Single device -> PDF
     if len(devices) == 1:
         d = devices[0]
         pdf_bytes = generate_device_passport_pdf_bytes(d)
@@ -364,16 +364,13 @@ def download_device_passport(modeladmin, request: HttpRequest, queryset: QuerySe
         resp["Content-Disposition"] = f'attachment; filename="device_passport_{d.pk}.pdf"'
         return resp
 
-    # ✅ Multi-select -> ZIP
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for d in devices:
             try:
                 pdf_bytes = generate_device_passport_pdf_bytes(d)
                 serial = (getattr(d, "serial_number", "") or "").strip()
-                base = f"{d.pk}"
-                if serial:
-                    base = f"{d.pk}_{slugify(serial)[:40]}"
+                base = f"{d.pk}_{slugify(serial)[:40]}" if serial else f"{d.pk}"
                 zf.writestr(f"device_passport_{base}.pdf", pdf_bytes)
             except Exception:
                 logger.exception("Passport PDF failed for device_id=%s", getattr(d, "pk", None))
@@ -453,7 +450,7 @@ class SparePartItemInline(admin.TabularInline):
 
 
 # ============================================================
-# Admin classes
+# Simple admins
 # ============================================================
 
 class AimagAdmin(admin.ModelAdmin):
@@ -462,17 +459,16 @@ class AimagAdmin(admin.ModelAdmin):
 
 
 class SumDuuregAdmin(admin.ModelAdmin):
-    list_display = ("aimag", "name")
-    list_filter = ("aimag",)
-    search_fields = ("name", "aimag__name")
-    ordering = ("aimag__name", "name")
+    list_display = ("id", "code", "name", "aimag_ref", "is_ub_district")
+    list_filter = ("aimag_ref", "is_ub_district")
+    search_fields = ("name", "code")
 
 
 class OrganizationAdmin(admin.ModelAdmin):
-    list_display = ("name", "org_type", "aimag", "is_ub")
-    list_filter = ("org_type", "is_ub", "aimag")
-    search_fields = ("name", "aimag__name")
-    ordering = ("aimag__name", "name")
+    list_display = ("name", "org_type", "aimag_ref", "is_ub")
+    list_filter = ("org_type", "is_ub", "aimag_ref")
+    search_fields = ("name", "aimag_ref__name")
+    ordering = ("aimag_ref__name", "name")
 
 
 class InstrumentCatalogAdmin(admin.ModelAdmin):
@@ -482,129 +478,70 @@ class InstrumentCatalogAdmin(admin.ModelAdmin):
     ordering = ("kind", "code")
 
 
+# ============================================================
+# LocationAdmin (✅ нэг л ширхэг, map + 📍 баганатай)
+# ============================================================
+
 class LocationAdmin(admin.ModelAdmin):
     change_list_template = "inventory/admin/location_changelist_with_map.html"
 
-    list_display = (
-        "name",
-        "location_type",
-        "aimag_ref",
-        "sum_ref",
-        "district_name",
-        "owner_org",
-        "wmo_index",
-        "latitude",
-        "longitude",
-        "device_count_col",
-        "view_map_col",
-    )
+    list_display = ("id", "name", "location_type", "aimag_ref", "sum_ref", "parent_location")
+    list_filter = ("location_type", "aimag_ref")
+    search_fields = ("name", "district_name", "aimag_ref__name", "sum_ref__name")
+    autocomplete_fields = ("aimag_ref", "sum_ref", "parent_location")
+    list_filter = ("aimag_ref", SumDuuregByAimagFilter, LocationTypeFilter)
+    search_fields = ("name", "code", "wmo_index")
+    
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "parent_location":
+            # parent_location зөвхөн METEO/WEATHER станцуудаас сонгогдоно
+            kwargs["queryset"] = Location.objects.filter(location_type="WEATHER").order_by("aimag_ref__name", "name")
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-    list_filter = (
-        "aimag_ref",
-        SumDuuregByAimagFilter,
-        LocationTypeFilter,
-    )
-    search_fields = ("name", "code", "wmo_index", "aimag_ref__name", "sum_ref__name", "owner_org__name")
-    ordering = ("aimag_ref__name", "sum_ref__name", "name")
-
-    class Media:
-        js = ("inventory/js/admin/location_add_cascade.js",)
-
-    def get_queryset(self, request: HttpRequest) -> QuerySet:
-        qs = super().get_queryset(request).select_related("aimag_ref", "sum_ref", "owner_org")
-
-        qs = qs.annotate(
+    def get_queryset(self, request):
+        qs = super().get_queryset(request).annotate(
             device_count=Count("devices", distinct=True),
-            pending_maintenance=Count(
-                "devices__maintenance_services",
-                filter=Q(devices__maintenance_services__workflow_status="SUBMITTED"),
-                distinct=True,
-            ),
-            pending_control=Count(
-                "devices__control_adjustments",
-                filter=Q(devices__control_adjustments__workflow_status="SUBMITTED"),
-                distinct=True,
-            ),
-        ).annotate(
-            pending_total=
+            pending_total=(
                 Count(
                     "devices__maintenance_services",
                     filter=Q(devices__maintenance_services__workflow_status="SUBMITTED"),
                     distinct=True,
                 )
-                +
-                Count(
+                + Count(
                     "devices__control_adjustments",
                     filter=Q(devices__control_adjustments__workflow_status="SUBMITTED"),
                     distinct=True,
                 )
+            ),
         )
-
         return _scope_qs(request, qs, aimag_field="aimag_ref")
-
-    @admin.display(description="Багаж", ordering="device_count")
-    def device_count_col(self, obj: Location):
-        return int(getattr(obj, "device_count", 0) or 0)
-
-    @admin.display(description="🗺 Харах")
-    def view_map_col(self, obj: Location):
-        try:
-            url = reverse(f"{self.admin_site.name}:inventory_location_map_one", args=[obj.pk])
-            return format_html('<a class="button" href="{}">Харах</a>', url)
-        except Exception:
-            return "-"
 
     def get_urls(self):
         urls = super().get_urls()
         custom = [
-            # ✅ LocationAdmin-д зөвхөн Location-той холбоотой custom url-ууд байна
             path("sums-by-aimag/", self.admin_site.admin_view(self.sums_by_aimag_view), name="locations-sums-by-aimag"),
             path("map/", self.admin_site.admin_view(self.map_view), name="inventory_location_map"),
             path("<int:location_id>/map-one/", self.admin_site.admin_view(self.map_one_view), name="inventory_location_map_one"),
         ]
         return custom + urls
 
-    def sums_by_aimag_view(self, request: HttpRequest):
-        """Аймаг сонгоход харгалзах сумдыг JSON-оор буцаах (Select2-т зориулагдсан)"""
-        aimag_id = (request.GET.get("aimag_id") or "").strip()
-        qs = SumDuureg.objects.all().order_by("name")
+    @staticmethod
+    def _safe_int(v):
+        try:
+            return int(v)
+        except Exception:
+            return None
+
+    def sums_by_aimag_view(self, request):
+        aimag_id = self._safe_int(request.GET.get("aimag_id"))
+        qs = SumDuureg.objects.all()
         if aimag_id:
             qs = qs.filter(aimag_id=aimag_id)
-        results = [{"id": s.id, "name": getattr(s, "name_mn", str(s)), "text": getattr(s, "name_mn", str(s))} for s in qs]
+        qs = qs.order_by("name")
+        results = [{"id": s.id, "text": s.name} for s in qs]
         return JsonResponse({"results": results})
 
-    def map_view(self, request: HttpRequest):
-        """Бүх байршлыг газрын зураг дээр харах"""
-        qs = self.get_queryset(request)
-        ctx = dict(
-            self.admin_site.each_context(request),
-            title="Станцуудын байршил (Газрын зураг)",
-            locations_json=json.dumps(self._build_locations_payload(qs), ensure_ascii=False),
-        )
-        return render(request, "inventory/location_map.html", ctx)
-
-    def map_one_view(self, request: HttpRequest, location_id: int):
-        """Тухайн нэг байршлыг газрын зураг дээр фокуслаж харах"""
-        qs = self.get_queryset(request).filter(id=location_id)
-        ctx = dict(
-            self.admin_site.each_context(request),
-            title="Байршил (Газрын зураг)",
-            locations_json=json.dumps(self._build_locations_payload(qs), ensure_ascii=False),
-            focus_id=location_id,
-        )
-        return render(request, "inventory/location_map.html", ctx)
-
-        return custom + urls
-
-    def sums_by_aimag_view(self, request: HttpRequest):
-        aimag_id = (request.GET.get("aimag_id") or "").strip()
-        qs = SumDuureg.objects.all().order_by("name")
-        if aimag_id:
-            qs = qs.filter(aimag_id=aimag_id)
-        results = [{"id": s.id, "name": s.name, "text": s.name} for s in qs]
-        return JsonResponse({"results": results})
-
-    def _build_locations_payload(self, qs: QuerySet[Location]):
+    def _build_locations_payload(self, qs):
         items = []
         for o in qs[:5000]:
             if o.latitude is None or o.longitude is None:
@@ -614,20 +551,15 @@ class LocationAdmin(admin.ModelAdmin):
                     "id": o.id,
                     "name": o.name,
                     "type": (o.location_type or "OTHER"),
-                    "kind": (o.location_type or "OTHER"),
                     "org": getattr(getattr(o, "owner_org", None), "name", "") or "",
                     "device_count": int(getattr(o, "device_count", 0) or 0),
-                    "pending_maintenance": int(getattr(o, "pending_maintenance", 0) or 0),
-                    "pending_control": int(getattr(o, "pending_control", 0) or 0),
                     "pending_total": int(getattr(o, "pending_total", 0) or 0),
                     "aimag": getattr(getattr(o, "aimag_ref", None), "name", "") or "",
                     "sum": getattr(getattr(o, "sum_ref", None), "name", "") or "",
-                    "district": o.district_name or "",
+                    "district": getattr(o, "district_name", "") or "",
                     "lat": float(o.latitude),
                     "lon": float(o.longitude),
-                    "wmo": o.wmo_index or "",
-                    "loc_admin_url": reverse(f"{self.admin_site.name}:inventory_location_change", args=[o.id]),
-                    "device_list_url": reverse(f"{self.admin_site.name}:inventory_device_changelist") + f"?location__id__exact={o.id}",
+                    "wmo": getattr(o, "wmo_index", "") or "",
                 }
             )
         return items
@@ -657,9 +589,23 @@ class LocationAdmin(admin.ModelAdmin):
         )
         return render(request, "inventory/location_map.html", ctx)
 
+    @admin.display(description="Багаж")
+    def device_count_col(self, obj):
+        return int(getattr(obj, "device_count", 0) or 0)
+
+    @admin.display(description="Байршил")
+    def view_on_map(self, obj: Location):
+        if obj.latitude is None or obj.longitude is None:
+            return "—"
+        url = reverse(f"{self.admin_site.name}:{self.model._meta.app_label}_{self.model._meta.model_name}_inventory_location_map_one", args=[obj.id])
+        return format_html('<a class="button" href="{}" target="_blank" rel="noopener">📍 Харах</a>', url)
+
+
+# ============================================================
+# DeviceAdmin (✅ нэг л ширхэг, + 📍 баганатай)
+# ============================================================
 
 class DeviceAdminForm(forms.ModelForm):
-    """Admin form нэмэлт талбар: location өөрчлөх үед movement reason хадгална."""
     movement_reason = forms.CharField(
         label="Шилжилтийн шалтгаан",
         required=False,
@@ -677,7 +623,7 @@ class DeviceMovementAdmin(admin.ModelAdmin):
     list_display = ("moved_at", "device", "device_kind", "from_location", "to_location", "aimag_col", "reason", "moved_by")
     list_select_related = ("device", "from_location", "to_location", "to_location__aimag_ref")
     list_filter = (("moved_at", admin.DateFieldListFilter), "device__kind", "to_location__aimag_ref")
-    search_fields = ("device__serial_number", "reason")
+    search_fields = ("device__serial_number", "device__inventory_code", "reason")
     ordering = ("-moved_at", "-id")
     autocomplete_fields = ("device", "from_location", "to_location", "moved_by")
 
@@ -697,20 +643,9 @@ class DeviceMovementAdmin(admin.ModelAdmin):
             return ""
 
 
-@admin.register(Device)
 class DeviceAdmin(admin.ModelAdmin):
-    """
-    Device admin (production-ready):
-    - QR preview
-    - QR actions
-    - Device passport (action + per-device view)
-    - Movement auto-log via movement_reason
-    - Calibration warning badge + VerificationBucketFilter
-    """
-
     form = DeviceAdminForm
     actions = [generate_qr, revoke_qr, download_device_passport]
-
     inlines = [MaintenanceHistoryInline, ControlHistoryInline, DeviceMovementInline]
 
     list_display = (
@@ -718,13 +653,13 @@ class DeviceAdmin(admin.ModelAdmin):
         "kind",
         "status",
         "location",
+        "location_map",      # ✅ 📍
         "verification_badge",
         "qr_preview",
     )
     list_filter = ("kind", "status", VerificationBucketFilter)
     search_fields = ("serial_number", "inventory_code", "other_name", "location__name")
     ordering = ("-id",)
-
     readonly_fields = ("qr_preview",)
 
     class Media:
@@ -741,6 +676,62 @@ class DeviceAdmin(admin.ModelAdmin):
         if db_field.name == "location":
             kwargs["queryset"] = _scope_location_qs(request).order_by("name")
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path("<int:object_id>/passport/", self.admin_site.admin_view(self.passport_view), name="inventory_device_passport"),
+            path("catalog-by-kind/", self.admin_site.admin_view(self.catalog_by_kind_view), name="inventory_device_device_catalog_by_kind"),
+            path("location-options/", self.admin_site.admin_view(self.location_options_view), name="inventory_device_device_location_options"),
+        ]
+        return custom + urls
+
+    # --- Custom Views ---
+
+    def passport_view(self, request: HttpRequest, object_id: int):
+        device = get_object_or_404(Device, pk=object_id)
+        pdf_bytes = generate_device_passport_pdf_bytes(device)
+        return FileResponse(io.BytesIO(pdf_bytes), as_attachment=True, filename=f"passport_{device.pk}.pdf", content_type="application/pdf")
+
+    def catalog_by_kind_view(self, request: HttpRequest):
+        kind = (request.GET.get("kind") or "").strip().upper()
+        qs = InstrumentCatalog.objects.all()
+        if kind:
+            qs = qs.filter(kind=kind)
+        if hasattr(InstrumentCatalog, "is_active"):
+            qs = qs.filter(is_active=True)
+        qs = qs.order_by("code")
+        results = [{"id": x.id, "text": f"{x.code} - {x.name_mn}"} for x in qs]
+        return JsonResponse({"results": results})
+
+    def location_options_view(self, request: HttpRequest):
+        kind = (request.GET.get("kind") or "").strip().upper()
+        aimag_id = (request.GET.get("aimag") or "").strip() or None
+        sum_id = (request.GET.get("sum") or "").strip() or None
+
+        qs = _scope_location_qs(request)
+        if kind:
+            allowed = KIND_TO_LOCATION_TYPE.get(kind, [kind])
+            qs = qs.filter(location_type__in=allowed)
+        if_aimag_id = aimag_id
+        if aimag_id:
+            qs = qs.filter(aimag_ref_id=aimag_id)
+        if sum_id:
+            qs = qs.filter(sum_ref_id=sum_id)
+
+        qs = qs.order_by("name")[:2000]
+        results = [{"id": l.id, "text": l.name} for l in qs]
+        return JsonResponse({"results": results})
+
+    # --- Display Methods ---
+
+    @admin.display(description="Байршил")
+    def location_map(self, obj: Device):
+        loc = getattr(obj, "location", None)
+        if not loc or loc.latitude is None or loc.longitude is None:
+            return "—"
+        url = reverse(f"{self.admin_site.name}:{Location._meta.app_label}_{Location._meta.model_name}_inventory_location_map_one", args=[loc.id])
+        return format_html('<a class="button" href="{}" target="_blank" rel="noopener">📍</a>', url)
 
     @admin.display(description="QR")
     def qr_preview(self, obj: Device):
@@ -764,7 +755,6 @@ class DeviceAdmin(admin.ModelAdmin):
         field = _device_next_verif_field()
         if not field:
             return format_html('<span style="color:#666">—</span>')
-
         d = getattr(obj, field, None)
         if not d:
             return format_html('<span style="color:#6c757d;font-weight:600">❓ Огноо байхгүй</span>')
@@ -774,98 +764,25 @@ class DeviceAdmin(admin.ModelAdmin):
             return format_html('<span style="color:#dc3545;font-weight:700">⛔ Дууссан</span>')
 
         left = (d - today).days
-        left_i = int(left or 0)
-
-        if left_i <= 30:
-            return format_html(
-                '<span style="color:#fd7e14;font-weight:700">⚠️ ≤30 ({} өдөр)</span>',
-                left_i,
-            )
-        if left_i <= 90:
-            return format_html(
-                '<span style="color:#0d6efd;font-weight:700">🔵 ≤90 ({} өдөр)</span>',
-                left_i,
-            )
-
-        return format_html(
-            '<span style="color:#198754;font-weight:700">✅ OK ({} өдөр)</span>',
-            left_i,
-        )
-
-
-
-    def get_urls(self):
-        urls = super().get_urls()
-        custom = [
-            # ✅ Template: opts|admin_urlname:'passport'
-            path(
-                "<int:object_id>/passport/",
-                self.admin_site.admin_view(self.passport_view),
-                name="inventory_device_passport",
-            ),
-            # Dynamic selects
-            path("catalog-by-kind/", self.admin_site.admin_view(self.catalog_by_kind_view), name="device_catalog_by_kind"),
-            path("location-options/", self.admin_site.admin_view(self.location_options_view), name="device_location_options"),
-        ]
-        return custom + urls
-
-    def passport_view(self, request: HttpRequest, object_id: int):
-        device = get_object_or_404(Device, pk=object_id)
-        pdf_obj = generate_device_passport_pdf(device, request=request)
-
-        if hasattr(pdf_obj, "read"):
-            fp = pdf_obj
-            try:
-                fp.seek(0)
-            except Exception:
-                pass
-        else:
-            fp = io.BytesIO(pdf_obj)
-            fp.seek(0)
-
-        filename = f"device_passport_{(device.serial_number or device.pk)}.pdf"
-        return FileResponse(fp, as_attachment=True, filename=filename, content_type="application/pdf")
-
-    def catalog_by_kind_view(self, request: HttpRequest):
-        kind = (request.GET.get("kind") or "").strip().upper()
-        qs = InstrumentCatalog.objects.all()
-        if kind:
-            qs = qs.filter(kind=kind)
-        if hasattr(InstrumentCatalog, "is_active"):
-            qs = qs.filter(is_active=True)
-        return JsonResponse({"results": [{"id": x.id, "text": f"{x.code} - {x.name_mn}"} for x in qs.order_by("code")]})
-
-    def location_options_view(self, request: HttpRequest):
-        aimag_id = (request.GET.get("aimag") or "").strip() or None
-        sum_id = (request.GET.get("sum") or "").strip() or None
-        qs = _scope_location_qs(request).order_by("name")
-        if aimag_id:
-            qs = qs.filter(aimag_ref_id=aimag_id)
-        if sum_id:
-            qs = qs.filter(sum_ref_id=sum_id)
-        return JsonResponse([{"id": l.id, "name": l.name} for l in qs], safe=False)
+        if left <= 30:
+            return format_html('<span style="color:#fd7e14;font-weight:700">⚠️ ≤30 ({} өдөр)</span>', left)
+        if left <= 90:
+            return format_html('<span style="color:#0d6efd;font-weight:700">🔵 ≤90 ({} өдөр)</span>', left)
+        return format_html('<span style="color:#198754;font-weight:700">✅ OK ({} өдөр)</span>', left)
 
     def save_model(self, request: HttpRequest, obj: Device, form, change: bool) -> None:
         old_loc_id = None
         if change and obj.pk:
-            try:
-                old_loc_id = Device.objects.filter(pk=obj.pk).values_list("location_id", flat=True).first()
-            except Exception:
-                old_loc_id = None
+            old_loc_id = Device.objects.filter(pk=obj.pk).values_list("location_id", flat=True).first()
 
         super().save_model(request, obj, form, change)
 
-        # movement auto-log
         try:
             new_loc_id = obj.location_id
             if change and old_loc_id != new_loc_id:
                 prof = getattr(request.user, "profile", None) or getattr(request.user, "userprofile", None)
                 moved_by = getattr(prof, "pk", None)
-                reason = ""
-                try:
-                    reason = (form.cleaned_data.get("movement_reason") or "").strip()
-                except Exception:
-                    reason = ""
+                reason = (form.cleaned_data.get("movement_reason") or "").strip()
                 DeviceMovement.objects.create(
                     device=obj,
                     from_location_id=old_loc_id,
@@ -921,6 +838,7 @@ class SparePartOrderAdmin(admin.ModelAdmin):
     list_filter = ("status", "aimag")
     search_fields = ("order_no",)
     ordering = ("-created_at", "-id")
+
     inlines = [SparePartItemInline]
 
     def get_queryset(self, request: HttpRequest) -> QuerySet:
@@ -935,21 +853,29 @@ class UserProfileAdmin(admin.ModelAdmin):
     ordering = ("user__username",)
 
 
-class AuthAuditLogAdmin(admin.ModelAdmin):
-    list_display = ("created_at", "action", "username", "user", "ip_address")
-    list_filter = ("action",)
-    search_fields = ("username", "user__username", "ip_address", "user_agent")
-    ordering = ("-created_at", "-id")
+class AuditLogAdmin(admin.ModelAdmin):
+    """AuthAuditLog/AuditEvent model field names өөрчлөгдөхөд admin check унагахгүй."""
+    ordering = ("-id",)
+
+    def get_list_display(self, request):
+        fields = [f.name for f in self.model._meta.get_fields() if getattr(f, "concrete", False)]
+        preferred = [x for x in ("created_at", "timestamp", "user", "username", "ip", "ip_address", "action", "event_type") if x in fields]
+        rest = [x for x in fields if x not in preferred][:8]
+        return tuple(preferred + rest)
+
+    def get_list_filter(self, request):
+        fields = [f.name for f in self.model._meta.get_fields() if getattr(f, "concrete", False)]
+        preferred = [x for x in ("action", "event_type", "created_at", "timestamp") if x in fields]
+        return tuple(preferred)
+
+    def get_search_fields(self, request):
+        fields = [f.name for f in self.model._meta.get_fields() if getattr(f, "concrete", False)]
+        candidates = [x for x in ("username", "user__username", "message", "object_id") if x in fields or "__" in x]
+        return tuple(candidates)
 
 
 if AuditEvent is not None:
-    class AuditEventAdmin(admin.ModelAdmin):
-        list_display = ("created_at", "actor", "action", "model_label", "object_id", "ip_address")
-        list_filter = ("action", "model_label")
-        search_fields = ("actor__username", "action", "model_label", "object_id", "object_repr", "ip_address")
-        ordering = ("-created_at", "-id")
-else:
-    AuditEventAdmin = None  # type: ignore
+    AuditEventAdmin = AuditLogAdmin  # type: ignore
 
 
 # ============================================================
@@ -957,73 +883,76 @@ else:
 # ============================================================
 
 class InventoryAdminSite(AdminSite):
-    site_header = "БҮРТГЭЛ - Админ"
+    site_header = "ДЦУБ — БҮРТГЭЛ"
     site_title = "БҮРТГЭЛ"
-    index_title = "Удирдлага"
+    index_title = "Админ удирдлага"
 
     def get_urls(self):
-        # ✅ Lazy import хийж circular import-оос сэргийлэв
-        from .reports_hub_compat import (
-            reports_hub_view,
-            reports_chart_json,
-            reports_sums_by_aimag,
-            reports_table_json,
-            reports_export_devices_csv,
-            reports_export_locations_csv,
-            reports_export_maintenance_csv,
-            reports_export_control_csv,
-            reports_export_movements_csv,
-            reports_export_spareparts_csv,
-            reports_export_auth_audit_csv,
-            reports_export_csv,
-        )
-
         urls = super().get_urls()
-
         custom = [
-            # 📊 ReportsHub UI & API
-            path("reports/", self.admin_view(reports_hub_view), name="reports-hub"),
-            path("reports/chart.json/", self.admin_view(reports_chart_json), name="reports-chart-json"),
-            path("reports/sums.json/", self.admin_view(reports_sums_by_aimag), name="reports-sums-json"),
-            path("reports/table.json", self.admin_view(reports_table_json), name="reports-table-json"),
+            # ----------------------------
+            # Dashboard + Data Entry (PATCH 3.2)
+            # ----------------------------
+            path("dashboard/", self.admin_view(vadmin.dashboard_home), name="dashboard_home"),
+            path("dashboard/table/", self.admin_view(vadmin.dashboard_table), name="dashboard_table"),
+            path("dashboard/graph/", self.admin_view(vadmin.dashboard_graph), name="dashboard_graph"),
+            path("dashboard/general/", self.admin_view(vadmin.dashboard_general), name="dashboard_general"),
+            path("data-entry/", self.admin_view(vadmin.admin_data_entry), name="admin_data_entry"),
+            path("dashboard/pending-counts/", self.admin_view(wf.workflow_pending_counts), name="pending_counts_json"),
 
-            # ⚙️ WORKFLOW (Admin-only)
-            path("inventory/workflow/pending/", self.admin_view(wf.workflow_pending_dashboard), name="workflow_pending_dashboard"),
-            path("inventory/workflow/pending-counts/", self.admin_view(wf.workflow_pending_counts), name="workflow_pending_counts"),
+
+            # ----------------------------
+            # Workflow pages (PATCH 3.2)
+            # ----------------------------
+            path("inventory/workflow/pending/", self.admin_view(wf.workflow_pending_dashboard), name="workflow_pending"),
+            path("inventory/workflow/audit/", self.admin_view(wf.workflow_audit_log), name="workflow_audit"),
+
+
+
+            # Workflow dashboard & polling (Legacy/Admin)
+            path("inventory/workflow/pending-counts-legacy/", self.admin_view(wf.workflow_pending_counts), name="workflow_pending_counts"),
             path("inventory/workflow/review/", self.admin_view(wf.workflow_review_action), name="workflow_review_action"),
-            path("inventory/workflow/audit/", self.admin_view(wf.workflow_audit_log), name="workflow_audit_log"),
 
-            # 📥 Exports (CSV)
-            path("reports/export/devices.csv", self.admin_view(reports_export_devices_csv), name="reports-export-devices-csv"),
-            path("reports/export/locations.csv", self.admin_view(reports_export_locations_csv), name="reports-export-locations-csv"),
-            path("reports/export/maintenance.csv", self.admin_view(reports_export_maintenance_csv), name="reports-export-maintenance-csv"),
-            path("reports/export/control.csv", self.admin_view(reports_export_control_csv), name="reports-export-control-csv"),
-            path("reports/export/movements.csv", self.admin_view(reports_export_movements_csv), name="reports-export-movements-csv"),
-            path("reports/export/spareparts.csv", self.admin_view(reports_export_spareparts_csv), name="reports-export-spareparts-csv"),
-            path("reports/export/auth_audit.csv", self.admin_view(reports_export_auth_audit_csv), name="reports-export-auth-audit-csv"),
-            path("reports/export.csv/", self.admin_view(reports_export_csv), name="reports-export-csv"),
+            # Reports hub + APIs + exports
+            path("reports/", self.admin_view(rhc.reports_hub_view), name="reports-hub"),
+            path("api/reports/charts/", self.admin_view(rhc.reports_chart_json), name="reports-chart-json"),
+            path("api/reports/sums/", self.admin_view(rhc.reports_sums_by_aimag), name="reports-sums-by-aimag"),
+            path("api/reports/table/", self.admin_view(adash.reports_table_json), name="reports-table-json"),
+
+
+
+
+            path("reports/export/devices.csv/", self.admin_view(reports_export_devices_csv), name="reports-export-devices-csv"),
+            path("reports/export/locations.csv/", self.admin_view(reports_export_locations_csv), name="reports-export-locations-csv"),
+            path("reports/export/maintenance.csv/", self.admin_view(reports_export_maintenance_csv), name="reports-export-maintenance-csv"),
+            path("reports/export/control.csv/", self.admin_view(reports_export_control_csv), name="reports-export-control-csv"),
+            path("reports/export/movements.csv/", self.admin_view(reports_export_movements_csv), name="reports-export-movements-csv"),
+            path("reports/export/spareparts.csv/", self.admin_view(reports_export_spareparts_csv), name="reports-export-spareparts-csv"),
+            path("reports/export/auth-audit.csv/", self.admin_view(reports_export_auth_audit_csv), name="reports-export-auth-audit-csv"),
+            
+            
         ]
-
         return custom + urls
 
 
-# ✅ singleton instance (imported by meteo_config/urls.py)
+# ============================================================
+# Admin site instance + registrations
+# ============================================================
+
 inventory_admin_site = InventoryAdminSite(name="inventory_admin")
 
-# ============================================================
-# Register ALL admins to the custom site
-# ============================================================
 inventory_admin_site.register(Aimag, AimagAdmin)
 inventory_admin_site.register(SumDuureg, SumDuuregAdmin)
 inventory_admin_site.register(Organization, OrganizationAdmin)
-inventory_admin_site.register(InstrumentCatalog, InstrumentCatalogAdmin)
 inventory_admin_site.register(Location, LocationAdmin)
-inventory_admin_site.register(DeviceMovement, DeviceMovementAdmin)
+inventory_admin_site.register(InstrumentCatalog, InstrumentCatalogAdmin)
 inventory_admin_site.register(Device, DeviceAdmin)
+inventory_admin_site.register(DeviceMovement, DeviceMovementAdmin)
 inventory_admin_site.register(MaintenanceService, MaintenanceServiceAdmin)
 inventory_admin_site.register(ControlAdjustment, ControlAdjustmentAdmin)
 inventory_admin_site.register(SparePartOrder, SparePartOrderAdmin)
 inventory_admin_site.register(UserProfile, UserProfileAdmin)
-inventory_admin_site.register(AuthAuditLog, AuthAuditLogAdmin)
-if AuditEvent is not None and AuditEventAdmin is not None:
+inventory_admin_site.register(AuthAuditLog, AuditLogAdmin)
+
+if AuditEvent is not None:
     inventory_admin_site.register(AuditEvent, AuditEventAdmin)
