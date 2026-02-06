@@ -12,6 +12,8 @@ from django.db.models import Count, Q, Max
 from django.core.serializers.json import DjangoJSONEncoder
 import json
 from inventory.models import Location, SumDuureg, Device
+from django.http import JsonResponse
+from django.views.decorators.http import require_GET
 
 # ---------------------------------------------------------------------
 # 1. Admin Data Entry Redirection
@@ -32,9 +34,8 @@ def admin_data_entry(request: HttpRequest) -> HttpResponse:
 
 @staff_member_required
 def station_map_view(request):
-    """Compatibility alias for station map."""
+    """Энэ функц urls.py-д хэрэгтэй байгаа тул заавал байх ёстой"""
     return location_map(request)
-
 
 @staff_member_required
 def location_map(request, location_id: int | None = None):
@@ -43,6 +44,128 @@ def location_map(request, location_id: int | None = None):
     - /inventory/map/             -> бүх станцууд (cluster + filters)
     - /inventory/map/location/ID/ -> нэг станц (single marker)
     """
+    from inventory.models import Location, Aimag, SumDuureg, Device, InstrumentCatalog
+
+    # --- Helpers ---
+    def _p(*keys: str) -> str:
+        for k in keys:
+            v = (request.GET.get(k) or "").strip()
+            if v: return v
+        return ""
+
+    def _int(s: str) -> int | None:
+        try: return int(s)
+        except: return None
+
+    # --- 1) Single-location view ---
+    if location_id is not None:
+        loc = get_object_or_404(
+            Location.objects.select_related("aimag_ref", "sum_ref", "owner_org"),
+            pk=location_id,
+        )
+        item = {
+            "id": loc.id,
+            "name": loc.name,
+            "lat": float(loc.latitude) if loc.latitude is not None else None,
+            "lon": float(loc.longitude) if loc.longitude is not None else None,
+            "location_type": loc.location_type,
+            "aimag": getattr(loc.aimag_ref, "name", None),
+            "sum": getattr(loc.sum_ref, "name", None),
+            "district": getattr(loc, "district_name", None),
+            "owner_org": getattr(loc.owner_org, "name", None),
+        }
+        return render(request, "inventory/location_map_one.html", {"location_json": json.dumps(item, ensure_ascii=False)})
+
+    # --- 2) Filtered queryset (multi) ---
+    aimag_val = _int(_p("aimag", "aimag_ref_id"))
+    sum_val = _int(_p("sum", "sum_ref_id"))
+    kind_val = _p("kind", "device_kind")
+    status_val = _p("status", "device_status")
+
+    qs = Location.objects.select_related("aimag_ref", "sum_ref", "owner_org").all()
+
+    if aimag_val: qs = qs.filter(aimag_ref_id=aimag_val)
+    if sum_val: qs = qs.filter(sum_ref_id=sum_val)
+    if kind_val: qs = qs.filter(devices__kind__iexact=kind_val)
+    if status_val: qs = qs.filter(devices__status=status_val)
+
+    # --- 3) Aggregations ---
+    qs = qs.annotate(
+        device_count=Count("devices", distinct=True),
+        pending_total=Count(
+            "devices__maintenance_services",
+            distinct=True,
+            filter=Q(devices__maintenance_services__workflow_status="SUBMITTED")
+        ) + Count(
+            "devices__control_adjustments",
+            distinct=True,
+            filter=Q(devices__control_adjustments__workflow_status="SUBMITTED")
+        ),
+        last_maintenance_date=Max("devices__maintenance_services__date"),
+        any_broken=Count("devices", distinct=True, filter=Q(devices__status__in=["Broken", "Repair"])),
+    ).distinct()
+
+    rows = qs.values(
+        "id", "name", "latitude", "longitude", "location_type", "district_name",
+        "aimag_ref__name", "sum_ref__name", "owner_org__name",
+        "device_count", "pending_total", "last_maintenance_date", "any_broken",
+    )
+
+    items = []
+    for r in rows:
+        lat, lon = r.get("latitude"), r.get("longitude")
+        if lat and lon:
+            st = "Багажгүй" if (r.get("device_count") or 0) <= 0 else ("Эвдрэлтэй" if (r.get("any_broken") or 0) > 0 else "Хэвийн")
+            items.append({
+                "id": r.get("id"),
+                "name": r.get("name"),
+                "lat": float(lat),
+                "lon": float(lon),
+                "location_type": r.get("location_type"),
+                "aimag": r.get("aimag_ref__name"),
+                "sum": r.get("sum_ref__name"),
+                "device_status": st,
+                "device_count": r.get("device_count") or 0,
+                "pending_total": r.get("pending_total") or 0,
+            })
+
+    # --- 4) Шүүлтүүрт зориулж Dropdown өгөгдөл бэлдэх ---
+    aimags = Aimag.objects.all().order_by('name')
+    sums = SumDuureg.objects.filter(aimag_id=aimag_val).order_by('name') if aimag_val else []
+    kinds = [c[0] for c in InstrumentCatalog.Kind.choices]
+
+    context = {
+        "locations_json": json.dumps(items, ensure_ascii=False, cls=DjangoJSONEncoder),
+        "aimags": aimags,
+        "sums": sums,
+        "kinds": kinds,
+    }
+    return render(request, "inventory/location_map.html", context)
+
+
+def load_sums(request):
+    """
+    AJAX-аар сум/дүүргийн жагсаалт авах (JSON).
+    JS талууд (location_chained.js, admin_location_dropdown.js гэх мэт) JSON хүлээдэг.
+    """
+    from inventory.models import SumDuureg
+
+    # аль алиныг нь дэмжинэ
+    aimag_id = (
+        request.GET.get("aimag_id")
+        or request.GET.get("aimag")
+        or request.GET.get("aimag_ref")
+        or request.GET.get("aimag_ref_id")
+        or ""
+    ).strip()
+
+    qs = SumDuureg.objects.all().order_by("name")
+    if aimag_id:
+        qs = qs.filter(aimag_id=aimag_id)
+
+    data = [{"id": s.id, "name": s.name} for s in qs[:5000]]
+    return JsonResponse({"sums": data}, json_dumps_params={"ensure_ascii": False})
+
     # --- Helpers ---
     def _p(*keys: str) -> str:
         for k in keys:
@@ -161,7 +284,6 @@ def location_map(request, location_id: int | None = None):
         "inventory/location_map.html",
         {"locations_json": json.dumps(items, ensure_ascii=False, cls=DjangoJSONEncoder)},
     )
-
 
 # ---------------------------------------------------------------------
 # 3. QR Code Public & Private Views
@@ -319,3 +441,5 @@ def qr_device_public_passport_pdf(request, token):
     # inline: хөтөч дээр шууд нээгдэнэ (attachment бол татагдана)
     resp["Content-Disposition"] = f'inline; filename="device_passport_{device.pk}.pdf"'
     return resp
+
+

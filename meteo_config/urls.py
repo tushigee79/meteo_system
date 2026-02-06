@@ -4,6 +4,7 @@ from django.conf.urls.static import static
 from django.shortcuts import redirect
 from django.urls import path, include
 
+# inventory/admin.py дотор нэгтгэсэн inventory_admin_site-ийг импортлох
 from inventory.admin import inventory_admin_site
 
 urlpatterns = [

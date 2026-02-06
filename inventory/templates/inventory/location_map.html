@@ -149,7 +149,6 @@
     }
   }
 
-
   /* ===== Marker pulse (Pending > 0) ===== */
   .loc-pin .pin-wrap{ position:relative; width:14px; height:14px; }
   .loc-pin .pin-dot{
@@ -288,6 +287,28 @@
       </div>
     </div>
   </div>
+</div>
+
+<div class="filter-group">
+    <label>Аймаг/Хот:</label>
+    <select name="aimag" id="id_aimag_ref" class="form-control">
+        <option value="">--- Бүгд ---</option>
+        {% for a in aimags %}
+            <option value="{{ a.id }}" {% if request.GET.aimag == a.id|stringformat:"i" %}selected{% endif %}>
+                {{ a.name }}
+            </option>
+        {% endfor %}
+    </select>
+</div>
+
+<div class="filter-group">
+    <label>Төхөөрөмжийн төрөл:</label>
+    <select name="kind" id="id_device_kind" class="form-control">
+        <option value="">--- Бүгд ---</option>
+        {% for k in kinds %}
+            <option value="{{ k }}" {% if request.GET.kind == k %}selected{% endif %}>{{ k }}</option>
+        {% endfor %}
+    </select>
 </div>
 
 <script>
@@ -658,6 +679,35 @@ const locUrl = p.loc_admin_url || p.location_url || p.admin_url || p.url || "";
   });
 
   apply();
+  
 })();
 </script>
 {% endblock %}
+
+
+{% block extra_js %}
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script> <script>
+$(document).ready(function() {
+    // Аймаг сонгох талбарын утга өөрчлөгдөхөд
+    $("#id_aimag_ref, select[name='aimag']").change(function() {
+        const url = "{% url 'inventory:ajax_load_sums' %}";
+        const aimagId = $(this).val();
+
+        $.ajax({
+            url: url,
+            data: {
+                'aimag_ref': aimagId
+            },
+            success: function(data) {
+                // Сум/Дүүргийн жагсаалтыг шинэчлэх
+                $("#id_sum_ref, select[name='sum'], select[name='sumduureg']").html(data);
+                
+                // Хэрэв сум солигдсоны дараа газрын зургийг шууд шүүх бол:
+                // submit товчийг автоматаар дарах эсвэл шүүлтүүрийн функцийг дуудах
+                // $("form").submit(); 
+            }
+        });
+    });
+});
+</script>
+{% endblock extra_js %}

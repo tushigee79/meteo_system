@@ -1,4 +1,3 @@
-# inventory/admin.py (production-ready, deduped + map column)
 from __future__ import annotations
 
 import io
@@ -15,7 +14,7 @@ from django.contrib.admin import AdminSite
 from django.core.cache import cache
 from django.core.files.base import ContentFile
 from django.db.models import Count, Q, QuerySet
-from django.http import FileResponse, HttpRequest, HttpResponse, JsonResponse
+from django.http import FileResponse, HttpRequest, HttpResponse, JsonResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
 from django.utils import timezone
@@ -23,6 +22,8 @@ from django.utils.html import format_html
 from django.utils.text import slugify
 
 from . import views_admin_workflow as wf
+from . import views_admin as vadmin
+from .models import Location
 from .pdf_passport import generate_device_passport_pdf_bytes
 from .reports_hub_compat import (
     reports_hub_view,
@@ -38,6 +39,17 @@ from .reports_hub_compat import (
     reports_table_json,
 )
 from .views_dashboard_general import general_dashboard_view
+
+# Dashboard / Admin pages views (PATCH 3.2 imports)
+# Dashboard pages (HTML) - keep in views_admin to avoid import loops
+from . import views_admin as vadmin
+
+# JSON/APIs
+from . import admin_dashboard as adash
+
+# Workflow
+from . import views_admin_workflow as wf
+
 
 from .models import (
     Aimag,
@@ -70,12 +82,10 @@ KIND_TO_LOCATION_TYPE = {
     "OTHER": ["OTHER"],
 }
 
-# Optional model (if exists in your branch)
 try:
     from .models import AuditEvent  # type: ignore
-except Exception:  # pragma: no cover
-    AuditEvent = None  # type: ignore
-
+except Exception:
+    AuditEvent = None
 
 # ============================================================
 # Helpers (safe)
@@ -170,7 +180,7 @@ class SumDuuregByAimagFilter(admin.SimpleListFilter):
         aimag_id = (request.GET.get("aimag_ref__id__exact") or "").strip()
         if not aimag_id:
             return []
-        qs = SumDuureg.objects.filter(aimag_id=aimag_id).order_by("name")
+        qs = SumDuureg.objects.filter(aimag_ref_id=aimag_id).order_by("name")
 
         try:
             ub_id = get_ub_aimag_id()
@@ -446,17 +456,16 @@ class AimagAdmin(admin.ModelAdmin):
 
 
 class SumDuuregAdmin(admin.ModelAdmin):
-    list_display = ("aimag", "name")
-    list_filter = ("aimag",)
-    search_fields = ("name", "aimag__name")
-    ordering = ("aimag__name", "name")
+    list_display = ("id", "code", "name", "aimag_ref", "is_ub_district")
+    list_filter = ("aimag_ref", "is_ub_district")
+    search_fields = ("name", "code")
 
 
 class OrganizationAdmin(admin.ModelAdmin):
-    list_display = ("name", "org_type", "aimag", "is_ub")
-    list_filter = ("org_type", "is_ub", "aimag")
-    search_fields = ("name", "aimag__name")
-    ordering = ("aimag__name", "name")
+    list_display = ("name", "org_type", "aimag_ref", "is_ub")
+    list_filter = ("org_type", "is_ub", "aimag_ref")
+    search_fields = ("name", "aimag_ref__name")
+    ordering = ("aimag_ref__name", "name")
 
 
 class InstrumentCatalogAdmin(admin.ModelAdmin):
@@ -473,20 +482,18 @@ class InstrumentCatalogAdmin(admin.ModelAdmin):
 class LocationAdmin(admin.ModelAdmin):
     change_list_template = "inventory/admin/location_changelist_with_map.html"
 
-    list_display = (
-        "name",
-        "location_type",
-        "aimag_ref",
-        "sum_ref",
-        "owner_org",
-        "wmo_index",
-        "latitude",
-        "longitude",
-        "device_count_col",
-        "view_on_map",  # ✅ 📍 Байршил харах
-    )
+    list_display = ("id", "name", "location_type", "aimag_ref", "sum_ref", "parent_location")
+    list_filter = ("location_type", "aimag_ref")
+    search_fields = ("name", "district_name", "aimag_ref__name", "sum_ref__name")
+    autocomplete_fields = ("aimag_ref", "sum_ref", "parent_location")
     list_filter = ("aimag_ref", SumDuuregByAimagFilter, LocationTypeFilter)
     search_fields = ("name", "code", "wmo_index")
+    
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "parent_location":
+            # parent_location зөвхөн METEO/WEATHER станцуудаас сонгогдоно
+            kwargs["queryset"] = Location.objects.filter(location_type="WEATHER").order_by("aimag_ref__name", "name")
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def get_queryset(self, request):
         qs = super().get_queryset(request).annotate(
@@ -587,7 +594,7 @@ class LocationAdmin(admin.ModelAdmin):
     def view_on_map(self, obj: Location):
         if obj.latitude is None or obj.longitude is None:
             return "—"
-        url = reverse(f"{self.admin_site.name}:inventory_location_map_one", args=[obj.id])
+        url = reverse(f"{self.admin_site.name}:{self.model._meta.app_label}_{self.model._meta.model_name}_inventory_location_map_one", args=[obj.id])
         return format_html('<a class="button" href="{}" target="_blank" rel="noopener">📍 Харах</a>', url)
 
 
@@ -606,6 +613,31 @@ class DeviceAdminForm(forms.ModelForm):
     class Meta:
         model = Device
         fields = "__all__"
+
+
+class DeviceMovementAdmin(admin.ModelAdmin):
+    date_hierarchy = "moved_at"
+    list_display = ("moved_at", "device", "device_kind", "from_location", "to_location", "aimag_col", "reason", "moved_by")
+    list_select_related = ("device", "from_location", "to_location", "to_location__aimag_ref")
+    list_filter = (("moved_at", admin.DateFieldListFilter), "device__kind", "to_location__aimag_ref")
+    search_fields = ("device__serial_number", "device__inventory_code", "reason")
+    ordering = ("-moved_at", "-id")
+    autocomplete_fields = ("device", "from_location", "to_location", "moved_by")
+
+    @admin.display(description="Төрөл")
+    def device_kind(self, obj: DeviceMovement):
+        try:
+            return obj.device.kind
+        except Exception:
+            return ""
+
+    @admin.display(description="Аймаг")
+    def aimag_col(self, obj: DeviceMovement):
+        try:
+            loc = obj.to_location or obj.from_location
+            return getattr(getattr(loc, "aimag_ref", None), "name", "") if loc else ""
+        except Exception:
+            return ""
 
 
 class DeviceAdmin(admin.ModelAdmin):
@@ -645,26 +677,10 @@ class DeviceAdmin(admin.ModelAdmin):
     def get_urls(self):
         urls = super().get_urls()
         custom = [
-        path(
-            "<int:object_id>/passport/",
-            self.admin_site.admin_view(self.passport_view),
-            name="inventory_device_passport",  # OK
-        ),
-
-        # ✅ admin_urlname('device_catalog_by_kind') -> inventory_device_device_catalog_by_kind
-        path(
-            "catalog-by-kind/",
-            self.admin_site.admin_view(self.catalog_by_kind_view),
-            name="inventory_device_device_catalog_by_kind",
-        ),
-
-        # ✅ admin_urlname('device_location_options') -> inventory_device_device_location_options
-        path(
-            "location-options/",
-            self.admin_site.admin_view(self.location_options_view),
-            name="inventory_device_device_location_options",
-        ),
-    ]
+            path("<int:object_id>/passport/", self.admin_site.admin_view(self.passport_view), name="inventory_device_passport"),
+            path("catalog-by-kind/", self.admin_site.admin_view(self.catalog_by_kind_view), name="inventory_device_device_catalog_by_kind"),
+            path("location-options/", self.admin_site.admin_view(self.location_options_view), name="inventory_device_device_location_options"),
+        ]
         return custom + urls
 
     # --- Custom Views ---
@@ -694,6 +710,7 @@ class DeviceAdmin(admin.ModelAdmin):
         if kind:
             allowed = KIND_TO_LOCATION_TYPE.get(kind, [kind])
             qs = qs.filter(location_type__in=allowed)
+        if_aimag_id = aimag_id
         if aimag_id:
             qs = qs.filter(aimag_ref_id=aimag_id)
         if sum_id:
@@ -710,7 +727,7 @@ class DeviceAdmin(admin.ModelAdmin):
         loc = getattr(obj, "location", None)
         if not loc or loc.latitude is None or loc.longitude is None:
             return "—"
-        url = reverse(f"{self.admin_site.name}:inventory_location_map_one", args=[loc.id])
+        url = reverse(f"{self.admin_site.name}:{Location._meta.app_label}_{Location._meta.model_name}_inventory_location_map_one", args=[loc.id])
         return format_html('<a class="button" href="{}" target="_blank" rel="noopener">📍</a>', url)
 
     @admin.display(description="QR")
@@ -833,19 +850,29 @@ class UserProfileAdmin(admin.ModelAdmin):
     ordering = ("user__username",)
 
 
-class AuthAuditLogAdmin(admin.ModelAdmin):
-    list_display = ("created_at", "action", "username", "user", "ip_address")
-    list_filter = ("action",)
-    search_fields = ("username", "user__username", "ip_address", "user_agent")
-    ordering = ("-created_at", "-id")
+class AuditLogAdmin(admin.ModelAdmin):
+    """AuthAuditLog/AuditEvent model field names өөрчлөгдөхөд admin check унагахгүй."""
+    ordering = ("-id",)
+
+    def get_list_display(self, request):
+        fields = [f.name for f in self.model._meta.get_fields() if getattr(f, "concrete", False)]
+        preferred = [x for x in ("created_at", "timestamp", "user", "username", "ip", "ip_address", "action", "event_type") if x in fields]
+        rest = [x for x in fields if x not in preferred][:8]
+        return tuple(preferred + rest)
+
+    def get_list_filter(self, request):
+        fields = [f.name for f in self.model._meta.get_fields() if getattr(f, "concrete", False)]
+        preferred = [x for x in ("action", "event_type", "created_at", "timestamp") if x in fields]
+        return tuple(preferred)
+
+    def get_search_fields(self, request):
+        fields = [f.name for f in self.model._meta.get_fields() if getattr(f, "concrete", False)]
+        candidates = [x for x in ("username", "user__username", "message", "object_id") if x in fields or "__" in x]
+        return tuple(candidates)
 
 
-# Optional: AuditEvent admin
 if AuditEvent is not None:
-    class AuditEventAdmin(admin.ModelAdmin):
-        ordering = ("-id",)
-        list_display = ("id",)
-        search_fields = ("id",)
+    AuditEventAdmin = AuditLogAdmin  # type: ignore
 
 
 # ============================================================
@@ -853,25 +880,43 @@ if AuditEvent is not None:
 # ============================================================
 
 class InventoryAdminSite(AdminSite):
-    site_header = "БҮРТГЭЛ админ"
+    site_header = "ДЦУБ — БҮРТГЭЛ"
+    site_title = "БҮРТГЭЛ"
+    index_title = "Админ удирдлага"
 
     def get_urls(self):
         urls = super().get_urls()
-        my_urls = [
-            # Workflow dashboard & polling
-            path("inventory/workflow/pending/", self.admin_view(wf.workflow_pending_dashboard), name="workflow_pending_dashboard"),
-            path("inventory/workflow/pending-counts/", self.admin_view(wf.workflow_pending_counts), name="workflow_pending_counts"),
+        custom = [
+            # ----------------------------
+            # Dashboard + Data Entry (PATCH 3.2)
+            # ----------------------------
+            path("dashboard/", self.admin_view(vadmin.dashboard_home), name="dashboard_home"),
+            path("dashboard/table/", self.admin_view(vadmin.dashboard_table), name="dashboard_table"),
+            path("dashboard/graph/", self.admin_view(vadmin.dashboard_graph), name="dashboard_graph"),
+            path("dashboard/general/", self.admin_view(vadmin.dashboard_general), name="dashboard_general"),
+            path("data-entry/", self.admin_view(vadmin.admin_data_entry), name="admin_data_entry"),
+            path("dashboard/pending-counts/", self.admin_view(wf.workflow_pending_counts), name="pending_counts_json"),
+
+
+            # ----------------------------
+            # Workflow pages (PATCH 3.2)
+            # ----------------------------
+            path("inventory/workflow/pending/", self.admin_view(wf.workflow_pending), name="workflow_pending"),
+            path("inventory/workflow/audit/", self.admin_view(wf.workflow_audit), name="workflow_audit"),
+
+
+            # Workflow dashboard & polling (Legacy/Admin)
+            path("inventory/workflow/pending-counts-legacy/", self.admin_view(wf.workflow_pending_counts), name="workflow_pending_counts"),
             path("inventory/workflow/review/", self.admin_view(wf.workflow_review_action), name="workflow_review_action"),
-            path("inventory/workflow/audit/", self.admin_view(wf.workflow_audit_log), name="workflow_audit_log"),
 
-            # General dashboard
-            path("dashboard/general/", self.admin_view(general_dashboard_view), name="dashboard_general"),
-
-            # Reports hub + APIs + exports (single source: reports_hub_compat)
+            # Reports hub + APIs + exports
             path("reports/", self.admin_view(reports_hub_view), name="reports-hub"),
             path("api/reports/charts/", self.admin_view(reports_chart_json), name="reports-chart-json"),
             path("api/reports/sums/", self.admin_view(reports_sums_by_aimag), name="reports-sums-by-aimag"),
             path("api/reports/table/", self.admin_view(reports_table_json), name="reports-table-json"),
+            path("api/reports/charts/", self.admin_view(adash.reports_chart_json), name="reports-chart-json"),
+            path("api/reports/table/", self.admin_view(adash.reports_table_json), name="reports-table-json"),
+
 
             path("reports/export/devices.csv/", self.admin_view(reports_export_devices_csv), name="reports-export-devices-csv"),
             path("reports/export/locations.csv/", self.admin_view(reports_export_locations_csv), name="reports-export-locations-csv"),
@@ -880,8 +925,10 @@ class InventoryAdminSite(AdminSite):
             path("reports/export/movements.csv/", self.admin_view(reports_export_movements_csv), name="reports-export-movements-csv"),
             path("reports/export/spareparts.csv/", self.admin_view(reports_export_spareparts_csv), name="reports-export-spareparts-csv"),
             path("reports/export/auth-audit.csv/", self.admin_view(reports_export_auth_audit_csv), name="reports-export-auth-audit-csv"),
+            
+            
         ]
-        return my_urls + urls
+        return custom + urls
 
 
 # ============================================================
@@ -896,11 +943,12 @@ inventory_admin_site.register(Organization, OrganizationAdmin)
 inventory_admin_site.register(Location, LocationAdmin)
 inventory_admin_site.register(InstrumentCatalog, InstrumentCatalogAdmin)
 inventory_admin_site.register(Device, DeviceAdmin)
+inventory_admin_site.register(DeviceMovement, DeviceMovementAdmin)
 inventory_admin_site.register(MaintenanceService, MaintenanceServiceAdmin)
 inventory_admin_site.register(ControlAdjustment, ControlAdjustmentAdmin)
 inventory_admin_site.register(SparePartOrder, SparePartOrderAdmin)
 inventory_admin_site.register(UserProfile, UserProfileAdmin)
-inventory_admin_site.register(AuthAuditLog, AuthAuditLogAdmin)
+inventory_admin_site.register(AuthAuditLog, AuditLogAdmin)
 
 if AuditEvent is not None:
     inventory_admin_site.register(AuditEvent, AuditEventAdmin)
