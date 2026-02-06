@@ -75,9 +75,10 @@ class Command(BaseCommand):
                     created_aimag += 1
 
                 _, s_created = SumDuureg.objects.get_or_create(
-                    name=sum_name,
-                    aimag=aimag
+                name=sum_name,
+                aimag_ref=aimag
                 )
+
                 if s_created:
                     created_sum += 1
 

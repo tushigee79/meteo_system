@@ -2,356 +2,234 @@
 {% load static %}
 
 {% block extrastyle %}
-{{ block.super }}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
 <style>
-  .wf-wrap{padding:12px 10px}
-  .wf-top{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px}
-  .wf-card{background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:12px;padding:12px 14px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
-  .wf-metrics{display:flex;gap:10px;flex-wrap:wrap}
-  .wf-metric{min-width:140px}
-  .wf-metric .n{font-size:20px;font-weight:800;line-height:1}
-  .wf-metric .l{font-size:12px;opacity:.75;margin-top:4px}
-  .wf-form label{font-size:12px;opacity:.8;display:block;margin-bottom:4px}
-  .wf-form input,.wf-form select{min-width:180px;padding:7px 10px;border-radius:10px;border:1px solid rgba(0,0,0,.15);background:#fff}
-  .wf-table{width:100%;border-collapse:separate;border-spacing:0 8px}
-  .wf-row{background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:12px}
-  .wf-row td{padding:10px 12px;vertical-align:top}
-  .wf-row:hover{box-shadow:0 2px 8px rgba(0,0,0,.08);cursor:pointer}
-  .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700}
-  .badge-pending{background:rgba(245,158,11,.14);color:#b45309}
-  .badge-need{background:rgba(239,68,68,.12);color:#b91c1c}
-  .muted{opacity:.75;font-size:12px}
-  .wf-links a{margin-right:10px}
+  .wf-wrap { max-width: 1400px; margin: 0 auto; padding: 20px; }
+  /* Metric Cards */
+  .wf-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px; }
+  .wf-card { background: #fff; border-radius: 10px; padding: 20px; border-left: 4px solid #4e73df; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+  .wf-card.maint { border-left-color: #1cc88a; }
+  .wf-card.control { border-left-color: #f6c23e; }
+  .wf-card .label { font-size: 11px; font-weight: 800; text-transform: uppercase; color: #4e73df; margin-bottom: 5px; }
+  .wf-card .value { font-size: 24px; font-weight: 700; color: #5a5c69; }
 
-  .wf-btn{
-    border:1px solid rgba(0,0,0,.12);
-    border-radius:10px;
-    padding:6px 10px;
-    font-weight:700;
-    cursor:pointer;
-    background:#fff;
-    margin-right:6px;
-  }
-  .wf-approve{ border-color: rgba(34,197,94,.35); }
-  .wf-reject{ border-color: rgba(239,68,68,.35); }
-  .wf-btn:disabled{ opacity:.55; cursor:not-allowed; }
+  /* Filter Section */
+  .filter-box { background: #fff; border-radius: 10px; border: 1px solid #e3e6f0; padding: 20px; margin-bottom: 25px; }
+  .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; align-items: end; }
+  .filter-group label { display: block; font-size: 12px; font-weight: bold; margin-bottom: 5px; color: #333; }
+  .filter-control { width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #d1d3e2; }
 
+  /* Table Style */
+  .table-box { background: #fff; border-radius: 10px; border: 1px solid #e3e6f0; overflow: hidden; }
+  .wf-table { width: 100%; border-collapse: collapse; }
+  .wf-table th { background: #f8f9fc; padding: 12px; text-align: left; font-size: 12px; font-weight: 800; color: #4e73df; text-transform: uppercase; }
+  .wf-table td { padding: 15px 12px; border-top: 1px solid #e3e6f0; vertical-align: middle; }
+  .wf-row:hover { background: #fcfdfe; cursor: pointer; }
+  
+  .empty-state { padding: 60px; text-align: center; color: #b7b9cc; }
+  .empty-state i { font-size: 48px; margin-bottom: 15px; display: block; }
+
+  .badge { padding: 5px 10px; border-radius: 50px; font-size: 11px; font-weight: 700; }
+  .badge-pending { background: #fff4e5; color: #b45309; }
+  .badge-need { background: #ffebee; color: #b91c1c; }
+
+  .btn-action { border: 1px solid #ddd; padding: 6px 12px; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: 700; transition: 0.2s; }
+  .btn-approve { border-color: #1cc88a; color: #1cc88a; background: #fff; }
+  .btn-approve:hover { background: #1cc88a; color: #fff; }
+  .btn-reject { border-color: #e74a3b; color: #e74a3b; background: #fff; }
+  .btn-reject:hover { background: #e74a3b; color: #fff; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="wf-wrap">
-  <div class="wf-top">
-    <div class="wf-card wf-metrics" style="flex:1 1 420px;">
-      <div class="wf-metric">
-        <div class="n" id="m_total">{{ rows|length }}</div>
-        <div class="l">Нийт pending</div>
-      </div>
-      <div class="wf-metric">
-        <div class="n" id="m_maint">0</div>
-        <div class="l">Maintenance</div>
-      </div>
-      <div class="wf-metric">
-        <div class="n" id="m_control">0</div>
-        <div class="l">Control</div>
-      </div>
-      <div class="wf-metric">
-        <div class="n" id="m_scope">{% if is_aimag_engineer %}Аймгийн эрх{% else %}Admin{% endif %}</div>
-        <div class="l">Хандалтын хүрээ</div>
-      </div>
-    </div>
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h3 mb-0 text-gray-800"><i class="fas fa-hourglass-half"></i> {{ title }}</h1>
+    <span class="badge badge-info text-uppercase" style="background:#4e73df; color:#fff">
+      {% if is_aimag_engineer %}Аймгийн инженер{% else %}Админ хандалт{% endif %}
+    </span>
+  </div>
 
-    <div class="wf-card wf-form" style="flex:1 1 520px;">
-      <div style="font-weight:800;margin-bottom:8px;">Filters</div>
-      <form id="wfForm" class="wf-top" style="margin:0;align-items:flex-end;">
-        <div>
-          <label>Status</label>
-          <select name="status" id="f_status">
-            <option value="">(pending set)</option>
-            {% for s in pending_statuses %}
-              <option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div>
-          <label>Kind</label>
-          <select name="kind" id="f_kind">
-            <option value="">ALL</option>
-            <option value="MAINT" {% if filters.kind == "MAINT" %}selected{% endif %}>MAINT</option>
-            <option value="CONTROL" {% if filters.kind == "CONTROL" %}selected{% endif %}>CONTROL</option>
-          </select>
-        </div>
-        <div>
-          <label>Аймаг</label>
-          <input name="aimag" id="f_aimag" value="{{ filters.aimag }}" placeholder="код/нэр" {% if is_aimag_engineer %}disabled{% endif %}>
-        </div>
-        <div>
-          <label>Байгууллага</label>
-          <input name="org" id="f_org" value="{{ filters.org }}" placeholder="owner_org">
-        </div>
-        <div>
-          <label>Өдөр (days)</label>
-          <input name="days" id="f_days" value="{{ filters.days }}" placeholder="7, 30">
-        </div>
-        <div class="wf-links">
-          <a class="button" href="" id="btn_apply">Apply</a>
-          <a class="button" href="?" id="btn_reset">Reset</a>
-          <a class="button" href="{{ workflow_pending_url }}" target="_blank">Open new tab</a>
-        </div>
-      </form>
-      <div class="muted">⚡ Filters өөрчлөгдөхөд автоматаар шинэчлэгдэнэ (AJAX).</div>
+  <div class="wf-cards">
+    <div class="wf-card">
+        <div class="label">Нийт хүлээгдэж буй</div>
+        <div class="value" id="m_total">{{ rows|length }}</div>
+    </div>
+    <div class="wf-card maint">
+        <div class="label">Засвар (Maintenance)</div>
+        <div class="value" id="m_maint">0</div>
+    </div>
+    <div class="wf-card control">
+        <div class="label">Хяналт (Control)</div>
+        <div class="value" id="m_control">0</div>
     </div>
   </div>
 
-  <table class="wf-table">
-    <thead class="muted">
-      <tr>
-        <th style="text-align:left;padding:0 12px;">Kind</th>
-        <th style="text-align:left;padding:0 12px;">Status</th>
-        <th style="text-align:left;padding:0 12px;">Created</th>
-        <th style="text-align:left;padding:0 12px;">Device</th>
-        <th style="text-align:left;padding:0 12px;">Location</th>
-        <th style="text-align:left;padding:0 12px;">Aimag / Org</th>
-              <th style="text-align:left;padding:0 12px;width:160px;">Actions</th>
-</tr>
-    </thead>
-    <tbody id="wfBody">
-      {% for r in rows %}
-      <tr class="wf-row" data-record="{{ r.record_url }}">
-        <td><b>{{ r.kind }}</b></td>
-        <td>
-          {% if r.status == "NEED_APPROVAL" %}
-            <span class="badge badge-need">{{ r.status }}</span>
-          {% else %}
-            <span class="badge badge-pending">{{ r.status }}</span>
-          {% endif %}
-        </td>
-        <td class="muted">{{ r.created_at }}</td>
-        <td><a href="{{ r.device_url }}" target="_blank" rel="noopener">{{ r.device_label }}</a></td>
-        <td><a href="{{ r.location_url }}" target="_blank" rel="noopener">{{ r.location_label }}</a></td>
-        <td class="muted">{{ r.aimag }}<br>{{ r.org }}</td>
+  <div class="filter-box">
+    <form id="wfForm" class="filter-grid">
+      <div class="filter-group">
+        <label>Төлөв (Status)</label>
+        <select name="status" id="f_status" class="filter-control">
+          <option value="">Бүх (Pending set)</option>
+          {% for s in pending_statuses %}
+            <option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Төрөл (Kind)</label>
+        <select name="kind" id="f_kind" class="filter-control">
+          <option value="">Бүгд (ALL)</option>
+          <option value="MAINT" {% if filters.kind == "MAINT" %}selected{% endif %}>Засвар (MAINT)</option>
+          <option value="CONTROL" {% if filters.kind == "CONTROL" %}selected{% endif %}>Хяналт (CONTROL)</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Аймаг</label>
+        <input name="aimag" id="f_aimag" class="filter-control" value="{{ filters.aimag }}" placeholder="Код/Нэр" {% if is_aimag_engineer %}disabled{% endif %}>
+      </div>
+      <div class="filter-group">
+        <label>Байгууллага</label>
+        <input name="org" id="f_org" class="filter-control" value="{{ filters.org }}" placeholder="Owner Org">
+      </div>
+      <div class="filter-group" style="display:flex; gap:10px;">
+        <button type="button" id="btn_reset" class="btn-action w-100" style="background:#f8f9fc">Reset</button>
+        <a href="?" class="btn-action btn-approve w-100 text-center" style="text-decoration:none; line-height:2.4">Apply</a>
+      </div>
+    </form>
+    <div class="small text-muted mt-2"><i class="fas fa-bolt text-warning"></i> Шүүлтүүр өөрчлөгдөхөд өгөгдөл автоматаар (AJAX) шинэчлэгдэнэ.</div>
+  </div>
 
-        <td>
-          <button type="button" class="wf-btn wf-approve" data-kind="{{ r.kind }}" data-id="{{ r.record_id }}">Approve</button>
-          <button type="button" class="wf-btn wf-reject" data-kind="{{ r.kind }}" data-id="{{ r.record_id }}">Reject</button>
-        </td>
-
-      </tr>
-      {% empty %}
-      <tr><td class="muted" colspan="7" style="padding:12px;">Pending мөр олдсонгүй.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="table-box">
+    <table class="wf-table">
+      <thead>
+        <tr>
+          <th>Kind</th>
+          <th>Status</th>
+          <th>Created</th>
+          <th>Device</th>
+          <th>Location / Aimag</th>
+          <th style="width:180px">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="wfBody">
+        {% for r in rows %}
+        <tr class="wf-row" data-record="{{ r.record_url }}">
+          <td><strong>{{ r.kind }}</strong></td>
+          <td>
+            <span class="badge {% if r.status == 'NEED_APPROVAL' %}badge-need{% else %}badge-pending{% endif %}">
+              {{ r.status }}
+            </span>
+          </td>
+          <td class="small text-muted">{{ r.created_at }}</td>
+          <td><a href="{{ r.device_url }}" target="_blank"><b>{{ r.device_label }}</b></a></td>
+          <td>
+              <div class="small">{{ r.location_label }}</div>
+              <div class="small text-muted">{{ r.aimag }} | {{ r.org }}</div>
+          </td>
+          <td>
+            <div class="d-flex" style="gap:5px">
+                <button type="button" class="btn-action btn-approve wf-approve" data-kind="{{ r.kind }}" data-id="{{ r.record_id }}">Approve</button>
+                <button type="button" class="btn-action btn-reject wf-reject" data-kind="{{ r.kind }}" data-id="{{ r.record_id }}">Reject</button>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="6">
+            <div class="empty-state">
+              <i class="fas fa-clipboard-check"></i>
+              <p>Хүлээгдэж буй ажлын урсгал олдсонгүй.</p>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
+<script src="{% static 'admin/js/vendor/jquery/jquery.min.js' %}"></script>
 <script>
-(function(){
-  const countsUrl = "{{ workflow_pending_counts_url|default:'' }}";
-  const ajaxUrl = window.location.pathname; // same page
-
-  
+(function($){
+  const ajaxUrl = window.location.pathname; 
   const reviewUrl = "/django-admin/inventory/workflow/review/";
-function setMetrics(rows){
+
+  function updateMetrics(rows) {
     const total = rows.length;
     const maint = rows.filter(r => r.kind === "MAINT").length;
     const control = rows.filter(r => r.kind === "CONTROL").length;
-    document.getElementById("m_total").textContent = total;
-    document.getElementById("m_maint").textContent = maint;
-    document.getElementById("m_control").textContent = control;
+    $('#m_total').text(total);
+    $('#m_maint').text(maint);
+    $('#m_control').text(control);
   }
 
-  // row click => open record in new tab
-  function bindRowClicks(){
-    document.querySelectorAll(".wf-row").forEach(tr=>{
-      tr.addEventListener("click", (e)=>{
-        const a = e.target.closest("a");
-        if(a) return; // normal link click
-        const b = e.target.closest("button");
-        if(b) return; // button click
-        const url = tr.getAttribute("data-record");
-        if(url && url !== "#") window.open(url, "_blank", "noopener");
-      });
-    });
-  }
-
-  bindRowClicks();
-
-  function getCSRFToken(){
-    const m = document.cookie.match(/csrftoken=([^;]+)/);
-    return m ? m[1] : "";
-  }
-
-  async function postReview(kind, id, action, reason){
-    const csrf = getCSRFToken();
-    const body = new URLSearchParams();
-    body.set("kind", kind);
-    body.set("id", String(id));
-    body.set("action", action);
-    if(reason) body.set("reason", reason);
-
-    const res = await fetch(reviewUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-        "X-CSRFToken": csrf,
-        "X-Requested-With": "XMLHttpRequest",
-      },
-      credentials: "same-origin",
-      body: body.toString()
+  function bindEvents() {
+    $('.wf-row').off('click').on('click', function(e) {
+      if ($(e.target).closest('a, button').length) return;
+      const url = $(this).data('record');
+      if (url && url !== "#") window.open(url, '_blank', 'noopener');
     });
 
-    const data = await res.json().catch(()=> ({}));
-    if(!res.ok || !data.ok){
-      const msg = data.error || ("Request failed ("+res.status+")");
-      throw new Error(msg);
-    }
-    return data;
-  }
-
-  function wireButtons(){
-    document.querySelectorAll(".wf-approve, .wf-reject").forEach(btn=>{
-      // prevent double-binding
-      if(btn.dataset.wired === "1") return;
-      btn.dataset.wired = "1";
-
-      btn.addEventListener("click", async (ev)=>{
-        ev.preventDefault();
-        ev.stopPropagation();
-
-        const kind = btn.getAttribute("data-kind");
-        const id = btn.getAttribute("data-id");
-        const isReject = btn.classList.contains("wf-reject");
-
-        let reason = "";
-        if(isReject){
-          reason = prompt("Reject шалтгаан оруулна уу:", "");
-          if(reason === null) return;
-          reason = (reason || "").trim();
-          if(!reason){
-            alert("Reject шалтгаан заавал.");
-            return;
-          }
+    $('.wf-approve, .wf-reject').off('click').on('click', async function(e) {
+      e.preventDefault(); e.stopPropagation();
+      const $btn = $(this);
+      const kind = $btn.data('kind');
+      const id = $btn.data('id');
+      const isReject = $btn.hasClass('wf-reject');
+      let reason = "";
+      if (isReject) {
+        reason = prompt("Reject шалтгаан оруулна уу:", "");
+        if (reason === null) return;
+        if (!reason.trim()) return alert("Шалтгаан заавал оруулна уу.");
+      }
+      $btn.closest('td').find('button').prop('disabled', true);
+      try {
+        const res = await $.ajax({
+          url: reviewUrl, method: "POST",
+          data: { kind: kind, id: id, action: isReject ? "reject" : "approve", reason: reason, csrfmiddlewaretoken: '{{ csrf_token }}' }
+        });
+        if (res.ok) {
+          $btn.closest('tr').fadeOut(300, function() {
+            $(this).remove();
+            updateMetrics($('.wf-row').map(function() { return { kind: $(this).find('td strong').text() }; }).get());
+          });
         }
-
-        const cell = btn.closest("td");
-        const buttons = cell ? cell.querySelectorAll("button") : [btn];
-        buttons.forEach(b=> b.disabled = true);
-
-        try{
-          await postReview(kind, id, isReject ? "reject" : "approve", reason);
-          const tr = btn.closest("tr");
-          if(tr) tr.remove();
-          if(typeof window.refreshPendingCounts === "function"){
-            window.refreshPendingCounts();
-          }
-        }catch(e){
-          alert(e.message || "Алдаа гарлаа");
-          buttons.forEach(b=> b.disabled = false);
-        }
-      });
+      } catch (err) {
+        alert(err.responseJSON?.error || "Алдаа гарлаа");
+        $btn.closest('td').find('button').prop('disabled', false);
+      }
     });
   }
 
-  wireButtons();
-
-  // Initial counts (sidebar/dashboard uses separate endpoint, but we update page metrics too)
-  async function fetchCounts(){
-    if(!countsUrl) return;
-    try{
-      const res = await fetch(countsUrl, {credentials:"same-origin"});
-      if(!res.ok) return;
-      const data = await res.json();
-      // optional: could display elsewhere
-    }catch(e){}
-  }
-  fetchCounts();
-
-  const form = document.getElementById("wfForm");
-  const inputs = ["f_status","f_kind","f_aimag","f_org","f_days"].map(id=>document.getElementById(id));
-
-  function buildQuery(){
-    const params = new URLSearchParams();
-    const status = document.getElementById("f_status").value.trim();
-    const kind = document.getElementById("f_kind").value.trim();
-    const aimag = document.getElementById("f_aimag").value.trim();
-    const org = document.getElementById("f_org").value.trim();
-    const days = document.getElementById("f_days").value.trim();
-    if(status) params.set("status", status);
-    if(kind) params.set("kind", kind);
-    if(aimag && !document.getElementById("f_aimag").disabled) params.set("aimag", aimag);
-    if(org) params.set("org", org);
-    if(days) params.set("days", days);
-    params.set("ajax","1");
-    return params.toString();
-  }
-
-  function renderRows(rows){
-    const tbody = document.getElementById("wfBody");
-    tbody.innerHTML = "";
-    if(!rows.length){
-      tbody.innerHTML = '<tr><td class="muted" colspan="7" style="padding:12px;">Pending мөр олдсонгүй.</td></tr>';
-      return;
+  function renderRows(rows) {
+    const $tbody = $('#wfBody');
+    $tbody.empty();
+    if (!rows.length) {
+      $tbody.append('<tr><td colspan="6"><div class="empty-state"><i class="fas fa-clipboard-check"></i><p>Хүлээгдэж буй ажлын урсгал олдсонгүй.</p></div></td></tr>');
+      updateMetrics([]); return;
     }
-    rows.forEach(r=>{
-      const badgeClass = (r.status === "NEED_APPROVAL") ? "badge badge-need" : "badge badge-pending";
-      const tr = document.createElement("tr");
-      tr.className = "wf-row";
-      tr.setAttribute("data-record", r.record_url || "#");
-      tr.innerHTML = `
-        <td><b>${r.kind || ""}</b></td>
-        <td><span class="${badgeClass}">${r.status || ""}</span></td>
-        <td class="muted">${r.created_at || ""}</td>
-        <td><a href="${r.device_url || "#"}" target="_blank" rel="noopener">${r.device_label || "-"}</a></td>
-        <td><a href="${r.location_url || "#"}" target="_blank" rel="noopener">${r.location_label || "-"}</a></td>
-        <td class="muted">${r.aimag || "-"}<br>${r.org || "-"}</td>
-        <td>
-          <button type="button" class="wf-btn wf-approve" data-kind="${r.kind || ""}" data-id="${r.record_id}">Approve</button>
-          <button type="button" class="wf-btn wf-reject" data-kind="${r.kind || ""}" data-id="${r.record_id}">Reject</button>
-        </td>
-      `;
-      tbody.appendChild(tr);
+    rows.forEach(r => {
+      const badgeClass = (r.status === "NEED_APPROVAL") ? "badge-need" : "badge-pending";
+      $tbody.append(`<tr class="wf-row" data-record="${r.record_url}"><td><strong>${r.kind}</strong></td><td><span class="badge ${badgeClass}">${r.status}</span></td><td class="small text-muted">${r.created_at}</td><td><a href="${r.device_url}" target="_blank"><b>${r.device_label}</b></a></td><td><div class="small">${r.location_label}</div><div class="small text-muted">${r.aimag} | ${r.org}</div></td><td><div class="d-flex" style="gap:5px"><button type="button" class="btn-action btn-approve wf-approve" data-kind="${r.kind}" data-id="${r.record_id}">Approve</button><button type="button" class="btn-action btn-reject wf-reject" data-kind="${r.kind}" data-id="${r.record_id}">Reject</button></div></td></tr>`);
     });
-    setMetrics(rows);
-    bindRowClicks();
-    wireButtons();
+    updateMetrics(rows); bindEvents();
   }
 
-  let t=null;
-  function scheduleRefresh(){
-    if(t) clearTimeout(t);
-    t=setTimeout(refresh, 250);
+  let timer;
+  function refresh() {
+    const params = $('#wfForm').serialize() + "&ajax=1";
+    $.getJSON(ajaxUrl + "?" + params, function(data) { if (data.ok) renderRows(data.rows); });
   }
 
-  async function refresh(){
-    const qs = buildQuery();
-    const url = ajaxUrl + "?" + qs;
-    try{
-      const res = await fetch(url, {credentials:"same-origin", headers: {"X-Requested-With":"XMLHttpRequest"}});
-      if(!res.ok) return;
-      const data = await res.json();
-      renderRows(data.rows || []);
-    }catch(e){}
-  }
+  $('.filter-control').on('change', function() { clearTimeout(timer); timer = setTimeout(refresh, 200); });
+  $('.filter-control').on('input', function() { if (this.tagName === 'INPUT') { clearTimeout(timer); timer = setTimeout(refresh, 500); } });
+  $('#btn_reset').on('click', function() { window.location.href = window.location.pathname; });
 
-  inputs.forEach(el=>{
-    if(!el) return;
-    el.addEventListener("input", scheduleRefresh);
-    el.addEventListener("change", scheduleRefresh);
+  $(document).ready(function() {
+    bindEvents();
+    updateMetrics($('.wf-row').map(function() { return { kind: $(this).find('td strong').text() }; }).get());
   });
-
-  // Apply button just syncs URL (non-ajax) for sharing
-  document.getElementById("btn_apply").addEventListener("click", (e)=>{
-    e.preventDefault();
-    const params = new URLSearchParams(buildQuery());
-    params.delete("ajax");
-    window.location.search = params.toString();
-  });
-
-  // set initial metric split based on server-rendered rows (best effort)
-  const initialRows = Array.from(document.querySelectorAll(".wf-row")).map(tr=>({
-    kind: tr.children[0]?.innerText?.trim(),
-  }));
-  setMetrics(initialRows);
-})();
+})(django.jQuery);
 </script>
 {% endblock %}

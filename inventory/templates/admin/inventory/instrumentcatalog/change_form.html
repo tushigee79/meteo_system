@@ -1,9 +1,23 @@
+{# templates/admin/inventory/device/change_form.html #}
 {% extends "admin/change_form.html" %}
-{% load static %}
+{% load static admin_urls %}
 
 {% block extrahead %}
   {{ block.super }}
   <script>
-    window.__instrumentcatalog_subcat_url = "{% url 'admin:instrumentcatalog_subcategory_options' %}";
+    // ✅ ABSOLUTE URL-ууд (reverse) — relative биш!
+    window.__deviceSumsUrl = "{% url 'inventory_admin:device_sums_by_aimag' %}";
+    window.__deviceLocUrl  = "{% url 'inventory_admin:device_location_options' %}";
+    window.__catalogByKindUrl = "{% url 'inventory_admin:device_catalog_by_kind' %}";
   </script>
+{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<script>
+  // ✅ JS-үүд энэ URL-уудыг ашиглана (hardcode хийхгүй)
+  window.__deviceCatalogUrl = "{{ device_catalog_by_kind_url }}";
+  window.__deviceSumsUrl = "{{ device_sums_by_aimag_url }}";
+  window.__deviceLocUrl = "{{ device_location_options_url }}";
+</script>
 {% endblock %}
