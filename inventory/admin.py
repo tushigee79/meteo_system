@@ -20,6 +20,8 @@ from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.text import slugify
+from django.http import HttpResponse
+from inventory.pdf_passport import generate_device_passport_pdf_bytes
 
 
 from . import views_admin_workflow as wf
@@ -351,32 +353,11 @@ def revoke_qr(modeladmin, request: HttpRequest, queryset: QuerySet):
 # Device Passport (PDF / ZIP)
 # ============================================================
 
-@admin.action(description="📄 Техник паспорт (PDF/ZIP)")
-def download_device_passport(modeladmin, request: HttpRequest, queryset: QuerySet):
-    devices = list(queryset)
-    if not devices:
-        return None
-
-    if len(devices) == 1:
-        d = devices[0]
-        pdf_bytes = generate_device_passport_pdf_bytes(d)
-        resp = HttpResponse(pdf_bytes, content_type="application/pdf")
-        resp["Content-Disposition"] = f'attachment; filename="device_passport_{d.pk}.pdf"'
-        return resp
-
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for d in devices:
-            try:
-                pdf_bytes = generate_device_passport_pdf_bytes(d)
-                serial = (getattr(d, "serial_number", "") or "").strip()
-                base = f"{d.pk}_{slugify(serial)[:40]}" if serial else f"{d.pk}"
-                zf.writestr(f"device_passport_{base}.pdf", pdf_bytes)
-            except Exception:
-                logger.exception("Passport PDF failed for device_id=%s", getattr(d, "pk", None))
-
-    resp = HttpResponse(buf.getvalue(), content_type="application/zip")
-    resp["Content-Disposition"] = 'attachment; filename="device_passports.zip"'
+def download_device_passport(self, request, queryset):
+    device = queryset.first()
+    pdf_bytes = generate_device_passport_pdf_bytes(device, request=request)
+    resp = HttpResponse(pdf_bytes, content_type="application/pdf")
+    resp["Content-Disposition"] = 'attachment; filename="device_passport.pdf"'
     return resp
 
 
@@ -466,7 +447,7 @@ class SumDuuregAdmin(admin.ModelAdmin):
 
 class OrganizationAdmin(admin.ModelAdmin):
     list_display = ("name", "org_type", "aimag_ref", "is_ub")
-    list_filter = ("org_type", "is_ub", "aimag_ref")
+    llist_filter = ("org_type", "is_ub", "aimag")
     search_fields = ("name", "aimag_ref__name")
     ordering = ("aimag_ref__name", "name")
 
@@ -645,7 +626,7 @@ class DeviceMovementAdmin(admin.ModelAdmin):
 
 class DeviceAdmin(admin.ModelAdmin):
     form = DeviceAdminForm
-    actions = [generate_qr, revoke_qr, download_device_passport]
+    actions = [download_device_passport]
     inlines = [MaintenanceHistoryInline, ControlHistoryInline, DeviceMovementInline]
 
     list_display = (

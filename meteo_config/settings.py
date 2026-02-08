@@ -120,92 +120,83 @@ JAZZMIN_SETTINGS = {
         "inventory.authauditlog": "fas fa-user-shield",
     },
 
+    # Sidebar: Inventory апп дээр нэмэлт линкүүд
     "custom_links": {
         "inventory": [
-            # ✅ PATCH 3: Dashboard Home (байхгүй бол нэм)
             {
                 "name": "Dashboard (Нүүр)",
                 "url": "admin:dashboard_home",
                 "icon": "fas fa-tachometer-alt",
                 "permissions": ["inventory.view_location"],
             },
-
-            # ✅ admin зам: /django-admin/ ... гэж нэг мөр болгов
             {
                 "name": "Өгөгдөл бүртгэх (Админ)",
-                "url": "/django-admin/data-entry/",
+                "url": "admin:admin_data_entry",
                 "icon": "fas fa-database",
                 "permissions": ["auth.view_user"],
             },
             {
                 "name": "Dashboard (Хүснэгт)",
-                "url": "/django-admin/dashboard/table/",
+                "url": "admin:dashboard_table",
                 "icon": "fas fa-table",
                 "permissions": ["inventory.view_device"],
             },
             {
                 "name": "Dashboard (График)",
-                "url": "/django-admin/dashboard/graph/",
+                "url": "admin:dashboard_graph",
                 "icon": "fas fa-chart-bar",
                 "permissions": ["inventory.view_device"],
             },
-
-            # ✅ Газрын зураг: давхардлыг арилгав (reverse-г үлдээв)
             {
                 "name": "Газрын зураг",
                 "url": "inventory_map",
                 "icon": "fas fa-map-marked-alt",
                 "permissions": ["inventory.view_location"],
             },
-
             {
                 "name": "Хүлээгдэж буй ажлууд",
-                "url": "/django-admin/inventory/workflow/pending/",
+                "url": "admin:workflow_pending",
                 "icon": "fas fa-tasks",
                 "permissions": [
                     "inventory.view_maintenanceservice",
                     "inventory.view_controladjustment",
                 ],
             },
-
-            # ⚠️ Энэ permission/model нэр таардаг эсэхээ шалга.
-            # Хэрэв WorkflowAuditLog model байхгүй бол үүнийг comment/устга.
             {
                 "name": "Хяналтын түүх (Audit)",
-                "url": "/django-admin/inventory/workflow/audit/",
+                "url": "admin:workflow_audit",
                 "icon": "fas fa-clipboard-list",
-                "permissions": ["inventory.view_authauditlog"],  # <-- өмнө нь view_workflowauditlog байсан
+                "permissions": ["inventory.view_authauditlog"],
             },
-
-            # ✅ PATCH 3: ReportsHub (байхгүй бол нэм)
-            # meteo_config/urls.py дээр path("admin/reports/", ...) гэж тавьсан байх ёстой.
             {
                 "name": "📊 Тайлан (Reports)",
-                "url": "/admin/reports/",
+                "url": "admin:reports_hub",
                 "icon": "fas fa-chart-pie",
                 "permissions": ["inventory.view_device"],
             },
-
             {
                 "name": "📌 Ерөнхий мэдээлэл",
-                "url": "/django-admin/dashboard/general/",
+                "url": "admin:dashboard_general",
                 "icon": "fas fa-info-circle",
                 "permissions": ["inventory.view_device"],
             },
         ],
     },
 
+    # Top menu: давхардалгүй, зөвхөн “гол” линкүүд
     "topmenu_links": [
-        {"name": "Dashboard", "url": "admin:index"},
+        {"name": "Админ", "url": "admin:index"},
         {"name": "Газрын зураг", "url": "inventory_map", "permissions": ["inventory.view_location"]},
-        # ⚠️ энд "reports-hub" гэж reverse нэр бичсэн байна — таны url name таарах ёстой.
-        # PATCH 3 дээр бид "reports_hub" (underscore) гэж өгсөн.
-        {"name": "Тайлан", "url": "reports_hub", "permissions": ["inventory.view_device"]},
+        {"name": "Dashboard", "url": "admin:dashboard_table", "permissions": ["inventory.view_device"]},
+        {"name": "График тайлан", "url": "admin:dashboard_graph", "permissions": ["inventory.view_device"]},
+        {"name": "Өгөгдөл бүртгэх", "url": "admin:admin_data_entry", "permissions": ["auth.view_user"]},
+        {"name": "Reports", "url": "admin:reports_hub", "permissions": ["inventory.view_device"]},
     ],
 }
 
 # ✅ Clickjacking / Leaflet admin map iframe зөвшөөрөх
 X_FRAME_OPTIONS = "SAMEORIGIN"
+
 
 # ==================================================
 # Verification expiry config (admin + dashboard)

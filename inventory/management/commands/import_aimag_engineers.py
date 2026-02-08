@@ -54,43 +54,49 @@ class Command(BaseCommand):
                 return
 
             def resolve_org(i: int, aimag, aimag_name: str, org_name: str):
-    """
-    org resolution priority:
-    1) CSV org provided and found -> use it
-    2) else auto: "<Аймаг> > УЦУОШТ" (create if missing)
-    """
-    org = None
+                """Resolve Organization for the imported AimagEngineer row.
 
-    if org_name:
-        org = Organization.objects.filter(name=org_name).first()
-        if not org:
-            self.stdout.write(self.style.WARNING(
-                f"[Row {i}] Organization not found (skipped): {org_name}"
-            ))
-            org = None
+                Priority:
+                1) If CSV "org" is provided AND exists -> use it
+                2) Else auto-create/find: "<Аймаг> > УЦУОШТ"
+                """
 
-    if org is None:
-        auto_name = f"{aimag_name} > УЦУОШТ"
+                org = None
 
-        # ✅ model field detect
-        org_defaults = {"org_type": "OBS_CENTER"}
+                if org_name:
+                    org = Organization.objects.filter(name=org_name).first()
+                    if not org:
+                        self.stdout.write(
+                            self.style.WARNING(
+                                f"[Row {i}] Organization not found (skipped): {org_name}"
+                            )
+                        )
+                        org = None
 
-        # aimag FK нь танайд aimag_ref байгаа
-        if hasattr(Organization, "_meta") and any(f.name == "aimag_ref" for f in Organization._meta.fields):
-            org_defaults["aimag_ref"] = aimag
-        elif hasattr(Organization, "_meta") and any(f.name == "aimag" for f in Organization._meta.fields):
-            org_defaults["aimag"] = aimag
+                if org is None:
+                    auto_name = f"{aimag_name} > УЦУОШТ"
 
-        # UB flag талбар байвал л онооно
-        if any(f.name == "is_ub" for f in Organization._meta.fields):
-            org_defaults["is_ub"] = (aimag_name.strip() == "Улаанбаатар")
+                    # model field detect (aimag_ref vs aimag)
+                    org_defaults = {"org_type": "OBS_CENTER"}
+                    if hasattr(Organization, "_meta") and any(
+                        f.name == "aimag_ref" for f in Organization._meta.fields
+                    ):
+                        org_defaults["aimag_ref"] = aimag
+                    elif hasattr(Organization, "_meta") and any(
+                        f.name == "aimag" for f in Organization._meta.fields
+                    ):
+                        org_defaults["aimag"] = aimag
 
-        org, _created = Organization.objects.get_or_create(
-            name=auto_name,
-            defaults=org_defaults
-        )
+                    # UB flag (optional)
+                    if any(f.name == "is_ub" for f in Organization._meta.fields):
+                        org_defaults["is_ub"] = (aimag_name.strip() == "Улаанбаатар")
 
-    return org
+                    org, _created = Organization.objects.get_or_create(
+                        name=auto_name,
+                        defaults=org_defaults,
+                    )
+
+                return org
 
 
 

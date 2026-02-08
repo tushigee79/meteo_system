@@ -19,7 +19,7 @@ from inventory.geo.district_lookup import lookup_ub_district
 
 
 # ============================================================
-# 1) ДЦУБ КТЛОГ (Лавлах ан)
+# 1) ДЦУБ КАТАЛОГ (Лавлах Сан)
 # ============================================================
 class InstrumentCatalog(models.Model):
     class Kind(models.TextChoices):
@@ -74,17 +74,14 @@ class Aimag(models.Model):
 
 
 class SumDuureg(models.Model):
-    name = models.CharField(max_length=150, verbose_name="р")
-
     aimag_ref = models.ForeignKey(
-        Aimag,
+        "Aimag",
         on_delete=models.CASCADE,
-        related_name="sums",          # ✅ ЗӨВ (ЗӨВХӨ ЭД)
-        verbose_name="Аймаг/Улаанбаатар",
-        null=True,
-        blank=True,
+        related_name="sums",
+        verbose_name="Аймаг",
     )
-
+    name = models.CharField(max_length=255, verbose_name="Сум/Дүүрэг")
+  
     is_ub_district = models.BooleanField(default=False)
 
     def __str__(self):
@@ -107,7 +104,7 @@ class SumDuureg(models.Model):
 
     class Meta:
         verbose_name = "Сум / Дүүрэг"
-        verbose_name_plural = "Сум / Дүүргүүд"
+        verbose_name_plural = "Сум / Дүүрэг"
         ordering = ["aimag_ref__name", "name"]
 
     def __str__(self):
@@ -121,7 +118,7 @@ class Organization(models.Model):
         OBS_CENTER = "OBS_CENTER", "УЦУОШТ"
         CAL_LAB = "CAL_LAB", "БОХЗТ лаборатори"
         HQ = "HQ", "ЦУОШГ"
-        OTHER = "OTHER", "Буад"
+        OTHER = "OTHER", "Бусад"
 
     name = models.CharField(max_length=255, verbose_name="Байгууллага")
     org_type = models.CharField(
@@ -129,24 +126,25 @@ class Organization(models.Model):
         choices=OrgType.choices,
         default=OrgType.OTHER,
         db_index=True,
+        verbose_name="Төрөл",
     )
 
-    aimag_ref = models.ForeignKey(
-        Aimag,
-        on_delete=models.SET_NULL,
-        related_name="organizations",   # ✅ ЗӨВ (ЭД Л)
-        verbose_name="Аймаг/Улаанбаатар",
+    # DB дээр чинь aimag_id байгаа тул талбарын нэрийг aimag гэж барина (зөв)
+    aimag = models.ForeignKey(
+        "inventory.Aimag",
         null=True,
         blank=True,
+        on_delete=models.SET_NULL,
+        related_name="organizations",
+        verbose_name="Аймаг",
     )
 
-    is_ub = models.BooleanField(default=False)
+    is_ub = models.BooleanField(default=False, verbose_name="УБ эсэх")
 
-    def __str__(self):
-        return self.name
-
-
-    is_ub = models.BooleanField(default=False, verbose_name="УБ х")
+    @property
+    def aimag_ref(self):
+        # хуучин код aimag_ref гэж дууддаг байж магадгүй тул alias
+        return self.aimag
 
     def __str__(self):
         return self.name
@@ -176,8 +174,6 @@ class Location(models.Model):
         default=LocationType.WEATHER,
         verbose_name="Байршлын төрөл",
     )
-
-    # … бусад талбарууд чинь хэвээр
 
 
     # ✅ backward-compat alias
