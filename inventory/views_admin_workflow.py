@@ -9,6 +9,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
+from django.urls import reverse
 
 from .models import MaintenanceService, ControlAdjustment
 from .admin_compat import get_user_aimag as _get_user_aimag
@@ -19,6 +20,10 @@ try:
     from .models import AuthAuditLog
 except Exception:
     AuthAuditLog = None
+
+
+def _admin_url(app_label: str, model_name: str, obj_id: int) -> str:
+    return reverse(f"admin:{app_label}_{model_name}_change", args=[obj_id])
 
 # ============================================================
 # Pending workflow row

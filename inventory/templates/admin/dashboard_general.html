@@ -39,8 +39,17 @@
       <input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}">
       <button class="btn" type="submit">Шүүх</button>
 
-      <a class="btn" href="{% url 'admin:dashboard-export-devices-csv' %}?{{ request.GET.urlencode }}">CSV</a>
-      <a class="btn" href="{% url 'admin:dashboard-export-devices-xlsx' %}?{{ request.GET.urlencode }}">Excel</a>
+      {% url 'admin:dashboard-export-devices-csv' as csv_url %}
+{% url 'admin:dashboard-export-devices-xlsx' as xlsx_url %}
+
+{% if csv_url %}
+  <a class="btn" href="{{ csv_url }}?{{ request.GET.urlencode }}">CSV</a>
+{% endif %}
+
+{% if xlsx_url %}
+  <a class="btn" href="{{ xlsx_url }}?{{ request.GET.urlencode }}">Excel</a>
+{% endif %}
+
     </form>
   </div>
 

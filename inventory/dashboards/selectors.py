@@ -1,4 +1,4 @@
-﻿# inventory/dashboards/selectors.py
+# inventory/dashboards/selectors.py
 from __future__ import annotations
 
 from typing import Optional
@@ -47,4 +47,6 @@ def scoped_devices_qs(user: User, base_qs: Optional[QuerySet] = None) -> QuerySe
 
     # Try common relations: device.location.aimag or device.location.aimag_ref
     # If your Location uses aimag_ref, this still works.
-    return qs.filter(location__aimag_id=aimag_id) | qs.filter(location__aimag_ref_id=aimag_id)
+    qs = qs.filter(location__aimag_id=aimag_id)
+
+

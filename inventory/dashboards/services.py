@@ -223,7 +223,7 @@ def build_map_points(
     if aimag_id:
         # common: location__aimag_ref or location__aimag
         try:
-            qs = qs.filter(location__aimag_ref_id=aimag_id)
+           qs = qs.filter(location__aimag_ref__id=aimag_id)
         except Exception:
             try:
                 qs = qs.filter(location__aimag_id=aimag_id)
@@ -232,10 +232,10 @@ def build_map_points(
 
     if sum_id:
         try:
-            qs = qs.filter(location__sum_duureg_id=sum_id)
+            qs = qs.filter(location__sum_ref__id=sum_id)
         except Exception:
             try:
-                qs = qs.filter(location__sum_id=sum_id)
+                qs = qs.filter(location__sum_ref__id=sum_id)
             except Exception:
                 pass
 
