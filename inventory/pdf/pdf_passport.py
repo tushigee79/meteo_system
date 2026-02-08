@@ -74,6 +74,14 @@ def build_device_timeline(device, limit: int = 20):
 # ---------------------------------------------------------------------
 # 2. Font & Setup
 # ---------------------------------------------------------------------
+def _ensure_fonts():
+    global MAIN_FONT, MAIN_FONT_BOLD
+    if MAIN_FONT and MAIN_FONT_BOLD:
+        return MAIN_FONT, MAIN_FONT_BOLD
+    MAIN_FONT, MAIN_FONT_BOLD = register_fonts()
+    return MAIN_FONT, MAIN_FONT_BOLD
+
+
 def register_fonts():
     """Фонтыг олон газраас хайж бүртгэх функц."""
     
@@ -118,7 +126,8 @@ def register_fonts():
     print("Warning: Mongolian font not found in:", search_paths)
     return 'Helvetica', 'Helvetica-Bold'
 
-MAIN_FONT, MAIN_FONT_BOLD = register_fonts()
+MAIN_FONT=None
+MAIN_FONT_BOLD=None
 
 # ---------------------------------------------------------------------
 # 3. PDF Components
