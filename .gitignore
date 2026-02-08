@@ -68,3 +68,6 @@ Thumbs.db
 *_snippet.py
 views_*_snippet.txt
 
+/_broken_backup/
+/import_source/
+/migrations_status_before.txt
