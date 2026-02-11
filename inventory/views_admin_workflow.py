@@ -9,13 +9,21 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
+from django.urls import reverse
 
-from .models import MaintenanceService, ControlAdjustment
-from .reports_hub import _get_user_aimag, _has_field, _admin_url
+from .models import MaintenanceService, ControlAdjustment, WorkflowStatus
+from .admin_compat import get_user_aimag as _get_user_aimag
+from .admin_compat import has_field as _has_field
+from .admin_compat import admin_url as _admin_url
+
 try:
     from .models import AuthAuditLog
 except Exception:
     AuthAuditLog = None
+
+
+def _admin_url(app_label: str, model_name: str, obj_id: int) -> str:
+    return reverse(f"admin:{app_label}_{model_name}_change", args=[obj_id])
 
 # ============================================================
 # Pending workflow row
@@ -29,6 +37,7 @@ class WorkflowRow:
     device_label: str
     device_id: Optional[int]
     device_url: str
+    record_id: int
     record_url: str
     location_label: str
     location_url: str
@@ -48,8 +57,9 @@ def workflow_pending_dashboard(request: HttpRequest):
     org = (request.GET.get("org") or "").strip()
     days = (request.GET.get("days") or "").strip()
 
-    PENDING_SET = ["PENDING", "NEED_APPROVAL"]
+    PENDING_SET = [WorkflowStatus.SUBMITTED]
     base_statuses = PENDING_SET if not status else [status]
+
 
     user_aimag = _get_user_aimag(request)
     is_aimag_engineer = request.user.groups.filter(name="AimagEngineer").exists()
@@ -132,6 +142,7 @@ def workflow_pending_dashboard(request: HttpRequest):
                     device_label=str(d),
                     device_id=getattr(d, "id", None),
                     device_url=_admin_url("inventory", "device", d.id) if d else "#",
+                    record_id=r.id,
                     record_url=_admin_url("inventory", "maintenanceservice", r.id),
                     location_label=str(loc),
                     location_url=_admin_url("inventory", "location", loc.id) if loc else "#",
@@ -152,6 +163,7 @@ def workflow_pending_dashboard(request: HttpRequest):
                     status=str(r.workflow_status),
                     created_at=created,
                     device_label=str(d),
+                    record_id=r.id,
                     device_id=getattr(d, "id", None),
                     device_url=_admin_url("inventory", "device", d.id) if d else "#",
                     record_url=_admin_url("inventory", "controladjustment", r.id),
@@ -180,6 +192,7 @@ def workflow_pending_dashboard(request: HttpRequest):
                         "record_url": r.record_url,
                         "location_label": r.location_label,
                         "location_url": r.location_url,
+                        "record_id": r.record_id,
                         "aimag": r.aimag,
                         "org": r.org,
                     }
@@ -204,7 +217,7 @@ def workflow_pending_dashboard(request: HttpRequest):
 
 @staff_member_required
 def workflow_pending_counts(request: HttpRequest):
-    PENDING_SET = ["PENDING", "NEED_APPROVAL"]
+    PENDING_SET = [WorkflowStatus.SUBMITTED]
 
     user_aimag = _get_user_aimag(request)
     is_aimag_engineer = request.user.groups.filter(name="AimagEngineer").exists()
@@ -251,12 +264,11 @@ def workflow_review_action(request: HttpRequest):
     obj = get_object_or_404(Model, pk=int(rid))
 
     if action == "approve":
-        obj.workflow_status = "APPROVED"
+        obj.workflow_status = WorkflowStatus.APPROVED
     else:
-        if not reason:
-            return JsonResponse({"ok": False, "error": "Reason required"}, status=400)
-        obj.workflow_status = "REJECTED"
-        if hasattr(obj, "reject_reason"):
+        obj.workflow_status = WorkflowStatus.REJECTED
+
+    if hasattr(obj, "reject_reason"):
             obj.reject_reason = reason
 
     obj.save()

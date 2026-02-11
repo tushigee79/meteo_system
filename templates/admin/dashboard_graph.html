@@ -1,0 +1,136 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}График тайлан{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static 'inventory/vendor/leaflet/leaflet.css' %}">
+<script src="{% static 'inventory/vendor/leaflet/leaflet.js' %}"></script>
+
+<!-- ✅ ECharts-ийг ганцхан удаа (local) -->
+<script src="{% static 'inventory/vendor/echarts/echarts.min.js' %}"></script>
+
+<style>
+  .card{
+    background:#fff;
+    border:1px solid rgba(0,0,0,.08);
+    border-radius:14px;
+    padding:14px;
+  }
+
+  .filters{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    align-items:end;
+    margin: 10px 0 14px;
+  }
+  .filters .f{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    min-width: 160px;
+  }
+  .muted{ opacity:.7; font-size:12px; }
+  .status{
+    font-size:12px;
+    padding:6px 10px;
+    border-radius:10px;
+    background:rgba(0,0,0,.05);
+    display:inline-block;
+  }
+
+  /* === 4 charts in one row === */
+  .charts-grid-4{
+    display: grid;
+    grid-template-columns: repeat(4, minmax(240px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  .chart-sm{
+    width: 100%;
+    height: 260px;
+  }
+
+  /* === Map full width below === */
+  .map-card{ width: 100%; }
+  #map{
+    width: 100%;
+    height: 520px;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  /* responsive fallbacks */
+  @media (max-width: 1600px){
+    .charts-grid-4{ grid-template-columns: repeat(2, minmax(240px, 1fr)); }
+  }
+  @media (max-width: 1100px){
+    .charts-grid-4{ grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>📊 График тайлан</h1>
+
+<div class="filters">
+  <div class="f">
+    <label>Эхлэх огноо</label>
+    <input id="date_from" type="date" value="{{ date_from }}">
+  </div>
+
+  <div class="f">
+    <label>Дуусах огноо</label>
+    <input id="date_to" type="date" value="{{ date_to }}">
+  </div>
+
+  <div class="f">
+    <label>Aimag ID (сонголт)</label>
+    <input id="aimag_id" type="number" placeholder="ж: 1">
+  </div>
+
+  <div class="f">
+    <label>Төрөл / Kind (сонголт)</label>
+    <input id="kind" type="text" placeholder="ж: AWS, RADAR...">
+  </div>
+
+  <div class="f">
+    <button id="applyBtn" class="button default">Шүүлтүүр хэрэглэх</button>
+    <span id="ajaxState" class="status">Ready</span>
+  </div>
+</div>
+
+<!-- === CHARTS: 4 IN ONE ROW === -->
+<div class="charts-grid-4">
+  <div class="card">
+    <div class="muted">Workflow</div>
+    <div id="chart_workflow" class="chart-sm"></div>
+  </div>
+
+  <div class="card">
+    <div class="muted">SLA (Pending age)</div>
+    <div id="chart_sla" class="chart-sm"></div>
+  </div>
+
+  <div class="card">
+    <div class="muted">Aimag breakdown</div>
+    <div id="chart_aimag" class="chart-sm"></div>
+  </div>
+
+  <div class="card">
+    <div class="muted">Device kind breakdown</div>
+    <div id="chart_kind" class="chart-sm"></div>
+  </div>
+</div>
+
+<!-- === MAP: FULL WIDTH BELOW === -->
+<div class="card map-card">
+  <div class="muted">Map</div>
+  <div id="map"></div>
+</div>
+
+<script src="{% static 'inventory/js/dashboard_graph.js' %}"></script>
+{% endblock %}

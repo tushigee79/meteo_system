@@ -1,0 +1,16 @@
+{% extends "admin/change_form.html" %}
+{% load i18n admin_urls %}
+
+{% block object-tools-items %}
+  {{ block.super }}
+
+  {% if original and original.workflow_status == "DRAFT" %}
+    <li>
+      <form method="post" style="display:inline;">
+        {% csrf_token %}
+        <input type="hidden" name="_submit_to_workflow" value="1" />
+        <button class="button" type="submit">Workflow → Submit</button>
+      </form>
+    </li>
+  {% endif %}
+{% endblock %}

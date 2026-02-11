@@ -117,8 +117,8 @@
         <tr class="wf-row" data-record="{{ r.record_url }}">
           <td><strong>{{ r.kind }}</strong></td>
           <td>
-            <span class="badge {% if r.status == 'NEED_APPROVAL' %}badge-need{% else %}badge-pending{% endif %}">
-              {{ r.status }}
+            <span class="badge badge-pending">
+             {{ r.status }}
             </span>
           </td>
           <td class="small text-muted">{{ r.created_at }}</td>
@@ -210,7 +210,7 @@
       updateMetrics([]); return;
     }
     rows.forEach(r => {
-      const badgeClass = (r.status === "NEED_APPROVAL") ? "badge-need" : "badge-pending";
+      const badgeClass = "badge-pending";
       $tbody.append(`<tr class="wf-row" data-record="${r.record_url}"><td><strong>${r.kind}</strong></td><td><span class="badge ${badgeClass}">${r.status}</span></td><td class="small text-muted">${r.created_at}</td><td><a href="${r.device_url}" target="_blank"><b>${r.device_label}</b></a></td><td><div class="small">${r.location_label}</div><div class="small text-muted">${r.aimag} | ${r.org}</div></td><td><div class="d-flex" style="gap:5px"><button type="button" class="btn-action btn-approve wf-approve" data-kind="${r.kind}" data-id="${r.record_id}">Approve</button><button type="button" class="btn-action btn-reject wf-reject" data-kind="${r.kind}" data-id="${r.record_id}">Reject</button></div></td></tr>`);
     });
     updateMetrics(rows); bindEvents();

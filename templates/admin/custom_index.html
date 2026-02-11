@@ -1,12 +1,14 @@
-{% extends "admin/index.html" %}
+{% extends "admin/base_site.html" %}
+{% load static %}
 
 {% block content %}
-<div style="margin-bottom:20px;">
-    <a href="/inventory/map/" class="button" target="_blank"
-       style="padding:10px 16px; background:#1f6feb; color:white; border-radius:6px; text-decoration:none;">
-        🗺 Станцуудын газрын зураг
-    </a>
-</div>
 
-{{ block.super }}
+{# --- Custom dashboard (KPI + charts) --- #}
+{% include "admin/dashboard.html" %}
+
+<hr style="margin:30px 0;">
+
+{# --- Default admin index (models list) --- #}
+{% include "admin/index.html" %}
+
 {% endblock %}

@@ -8,7 +8,7 @@ from django.db.models import Count, Q, Max
 from django.core.serializers.json import DjangoJSONEncoder
 from django.urls import reverse
 from django.utils import timezone
-from django.db.models import Count, Q, Max
+from django.db.models import Count, Q, Max, F
 from django.core.serializers.json import DjangoJSONEncoder
 import json
 from inventory.models import Location, SumDuureg, Device

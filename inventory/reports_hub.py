@@ -1,28 +1,26 @@
+# inventory/reports_hub_compat.py
 # inventory/views_admin_workflow.py
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, List, Optional
-
+from typing import Any, Optional
+from dataclasses import dataclass, field
 from django.contrib.admin.views.decorators import staff_member_required
-from django.db.models import Q
+from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_POST
+from dataclasses import dataclass, field
+from django.views.decorators.http import require_GET
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.db.models import Q
 from django.utils import timezone
-from django.views.decorators.http import require_GET, require_POST
+from django.shortcuts import render
+from django.contrib.auth.decorators import login_required
+from .models import Device, Location
+from .models import MaintenanceService, ControlAdjustment, DeviceMovement, AuthAuditLog
 
-from .models import ControlAdjustment, MaintenanceService
 
-# ------------------------------------------------------------
-# Safe imports (reports_hub vs reports_hub_compat)
-# ------------------------------------------------------------
-try:
-    # new/compat style
-    from .reports_hub_compat import _get_user_aimag, _has_field, _admin_url  # type: ignore
-except Exception:  # pragma: no cover
-    # legacy style
-    from .reports_hub import _get_user_aimag, _has_field, _admin_url  # type: ignore
-
+from .admin_compat import admin_url as _admin_url
+from .admin_compat import get_user_aimag as _get_user_aimag
+from .admin_compat import has_field as _has_field
 
 # ============================================================
 # Pending workflow row
@@ -358,3 +356,54 @@ def workflow_audit_log(request: HttpRequest) -> HttpResponse:
 # ------------------------------------------------------------
 workflow_pending = workflow_pending_dashboard
 workflow_audit = workflow_audit_log
+
+def _has_field(model: Any, field_name: str) -> bool:
+    try:
+        model._meta.get_field(field_name)
+        return True
+    except Exception:
+        return False
+
+
+def _get_user_aimag(user) -> Optional[object]:
+    """
+    Return user's aimag object if available (via UserProfile.aimag or user.profile.aimag).
+    Safe for different project layouts.
+    """
+    if not user or getattr(user, "is_anonymous", False):
+        return None
+
+    # common patterns: user.userprofile, user.profile
+    for attr in ("userprofile", "profile"):
+        prof = getattr(user, attr, None)
+        if prof is not None:
+            aimag = getattr(prof, "aimag", None)
+            if aimag is not None:
+                return aimag
+    return None
+
+
+def _admin_url(obj) -> str:
+    """
+    Admin change URL for a model instance.
+    """
+    if obj is None:
+        return ""
+    opts = obj._meta
+    return reverse(f"admin:{opts.app_label}_{opts.model_name}_change", args=[obj.pk])
+
+@login_required
+def workflow_pending_dashboard(request):
+    # Одоо 'timezone' алдаа өгөхгүй
+    tz = timezone.get_current_timezone()
+    
+    # Таны логик энд үргэлжилнэ...
+    pending_devices = Device.objects.filter(status='pending')
+    
+    ctx = {
+        'devices': pending_devices,
+        'now': timezone.now(),
+    }
+    
+    # Одоо 'render' алдаа өгөхгүй
+    return render(request, "admin/inventory/workflow_pending.html", ctx)

@@ -1,0 +1,110 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div style="padding: 20px;">
+    <h1>Хяналтын самбар (Live Charts)</h1>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <div id="status_chart" style="height: 400px; background: white; padding: 15px; border-radius: 10px;"></div>
+        <div id="workflow_chart" style="height: 400px; background: white; padding: 15px; border-radius: 10px;"></div>
+    </div>
+</div>
+
+<div style="min-width:150px;">
+  <div class="k">Гүйцэтгэгч</div>
+  <input type="text" id="id_performer" placeholder="Нэр эсвэл төрөл...">
+</div>
+
+<div class="card" id="kpi_container" style="display:none; margin-bottom:15px;">
+    <div style="display:flex; gap:20px;">
+        <div>Нийт ажил: <b id="kpi_total">0</b></div>
+        <div style="color:green;">Дууссан: <b id="kpi_done">0</b></div>
+        <div style="color:orange;">Хүлээгдэж буй: <b id="kpi_pending">0</b></div>
+    </div>
+</div>
+
+<div style="padding: 20px;">
+    <h1>Тайлангийн хүснэгт</h1>
+    
+    <div id="kpi_box" class="card" style="display:flex; gap:30px; padding:15px; background:#fff; margin-bottom:15px; border-radius:10px; border:1px solid #ddd;">
+        <div>Нийт ажил: <b id="kpi_total">0</b></div>
+        <div style="color:green;">Дууссан: <b id="kpi_done">0</b></div>
+        <div style="color:orange;">Хүлээгдэж буй: <b id="kpi_pending">0</b></div>
+    </div>
+
+    <div class="card" style="padding:15px; background:#f8f9fa; border-radius:10px; margin-bottom:15px;">
+        <select id="id_report">
+            <option value="maintenance">Засвар үйлчилгээ</option>
+            <option value="control">Хяналт тохируулга</option>
+        </select>
+        <input type="text" id="id_performer" placeholder="Гүйцэтгэгч хайх...">
+        <button onclick="loadTable()" style="background:#4e73df; color:#fff; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">Шүүх</button>
+    </div>
+
+    <div class="card" style="background:#fff; border-radius:10px; overflow:hidden; border:1px solid #ddd;">
+        <table style="width:100%; border-collapse:collapse;">
+            <thead style="background:#f1f3f5;">
+                <tr id="table_head"></tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+async function loadTable() {
+    const report = document.getElementById("id_report").value;
+    const performer = document.getElementById("id_performer").value;
+    const res = await fetch(`/reports/table.json?report=${report}&performer=${performer}`);
+    const result = await res.json();
+    
+    // KPI шинэчлэх
+    document.getElementById("kpi_total").textContent = result.meta.total || 0;
+    document.getElementById("kpi_done").textContent = result.meta.done || 0;
+    document.getElementById("kpi_pending").textContent = result.meta.pending || 0;
+
+    // Table шинэчлэх
+    const tbody = document.getElementById("tbody");
+    tbody.innerHTML = "";
+    result.data.forEach((r, i) => {
+        tbody.innerHTML += `<tr>
+            <td>${i+1}</td><td>${r.c1}</td><td>${r.c2}</td><td>${r.c3}</td>
+            <td>${r.c4}</td><td>${r.c5}</td><td>${r.c6}</td><td>${r.c7}</td>
+        </tr>`;
+    });
+}
+loadTable();
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script>
+(async () => {
+    const res = await fetch(window.location.pathname + "?ajax=1");
+    const data = await res.json();
+
+    // 1. Төлөв байдлын график (Timeline)
+    const sChart = echarts.init(document.getElementById('status_chart'));
+    sChart.setOption({
+        title: { text: 'Төхөөрөмжийн төлөв' },
+        tooltip: { trigger: 'axis' },
+        xAxis: { type: 'category', data: data.devices_by_status.axis },
+        yAxis: { type: 'value' },
+        series: Object.keys(data.devices_by_status.series).map(k => ({
+            name: k, type: 'line', data: data.devices_by_status.series[k]
+        }))
+    });
+
+    // 2. Үйл ажиллагааны график (Workflow)
+    const wChart = echarts.init(document.getElementById('workflow_chart'));
+    wChart.setOption({
+        title: { text: 'Засвар & Тохируулга' },
+        tooltip: { trigger: 'axis' },
+        xAxis: { type: 'category', data: data.workflow.axis },
+        yAxis: { type: 'value' },
+        series: [
+            { name: 'Засвар', type: 'bar', data: data.workflow.ms },
+            { name: 'Тохируулга', type: 'bar', data: data.workflow.ca }
+        ]
+    });
+    
+})();
+</script>
+{% endblock %}
