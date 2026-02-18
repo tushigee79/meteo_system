@@ -2,471 +2,369 @@
 from __future__ import annotations
 
 import json
-import csv
-from datetime import date, timedelta, datetime
-
-try:
-    import openpyxl
-except ImportError:
-    openpyxl = None
-
-try:
-    from .views_admin_workflow import workflow_pending_dashboard
-except Exception:
-    workflow_pending = workflow_pending_dashboard  # may be None if import failed
-
+from datetime import timedelta, date
+from typing import Any, Dict, List, Optional, Tuple
 
 from django.contrib.admin.views.decorators import staff_member_required
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db.models import Count, Q
-from django.http import HttpRequest, JsonResponse, HttpResponse
+from django.http import HttpRequest, JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
 
-from .models import Device, Location, MaintenanceService, ControlAdjustment, DeviceMovement
-from .views_admin_workflow import workflow_audit_log
+from .models import Device, Location, MaintenanceService, ControlAdjustment
 
-# ---------------------------------------------------------
-# 1. Helpers & Setup
-# ---------------------------------------------------------
-try:
-    from .dashboard import build_dashboard_context
-except ImportError:
-    def build_dashboard_context(user):
-        return {}
 
-try:
-    from .dashboard_metrics import (
-        build_calibration_counts,
-        build_dashboard_spec,
-    )
-except ImportError:
-    build_calibration_counts = None
-    build_dashboard_spec = None
-
-def _safe_float(v):
-    if v is None or v == "": return None
+# -----------------------------
+# Helpers (robust / safe)
+# -----------------------------
+def _field_exists(model, name: str) -> bool:
     try:
-        if isinstance(v, str): v = v.replace(",", ".")
-        return float(v)
-    except: return None
+        return name in {f.name for f in model._meta.fields}
+    except Exception:
+        return False
 
-def _get_attr_any(obj, *names):
-    for name in names:
-        val = getattr(obj, name, None)
-        if val is not None and val != "": return val
+def _date_range_from_request(request: HttpRequest) -> Tuple[date, date]:
+    """
+    Default: last 30 days.
+    """
+    today = timezone.localdate()
+    d_to = _parse_date(request.GET.get("date_to")) or today
+    d_from = _parse_date(request.GET.get("date_from")) or (d_to - timedelta(days=30))
+    if d_from > d_to:
+        d_from, d_to = d_to, d_from
+    return d_from, d_to
+
+def _pick_field(model, preferred: List[str]) -> Optional[str]:
+    for n in preferred:
+        if _field_exists(model, n):
+            return n
     return None
 
-def _parse_date(s: str | None) -> date | None:
-    if not s: return None
+
+def _get_user_aimag_id(user) -> Optional[int]:
+    """
+    AimagEngineer scope enforcement (best-effort).
+    - If you have UserProfile.aimag FK, it will be used.
+    - Otherwise returns None (no restriction).
+    """
     try:
-        y, m, d = s.split("-")
-        return date(int(y), int(m), int(d))
-    except: return None
-
-def _get_device_location(device: Device):
-    for fname in ("location", "location_ref", "current_location", "station", "site"):
-        loc = getattr(device, fname, None)
-        if loc: return loc
+        # Typical pattern: user.userprofile.aimag_id
+        up = getattr(user, "userprofile", None)
+        if up and getattr(up, "aimag_id", None):
+            return int(up.aimag_id)
+    except Exception:
+        pass
     return None
 
-def _get_str(request, key):
-    """ GET параметрээс утга авах helper """
-    val = request.GET.get(key, "").strip()
-    return val if val else None
 
-def _get_int(request, key):
-    val = request.GET.get(key, "").strip()
-    if val.isdigit():
-        return int(val)
-    return None
+def _is_aimag_engineer(user) -> bool:
+    try:
+        return user.groups.filter(name="AimagEngineer").exists()
+    except Exception:
+        return False
 
-def _apply_aimag_scope(qs, request, field_name):
-    """ Хэрэглэгчийн аймгаар шүүх helper """
-    user = request.user
-    if user.is_superuser:
-        return qs
-    
-    prof = getattr(user, "profile", None) or getattr(user, "userprofile", None)
-    if not prof:
-        return qs 
-    
-    aimag_id = getattr(prof, "aimag_id", None)
+
+def _parse_date(s: Optional[str]) -> Optional[date]:
+    if not s:
+        return None
+    try:
+        # expecting YYYY-MM-DD
+        return timezone.datetime.fromisoformat(s).date()
+    except Exception:
+        return None
+
+
+def _date_range_from_request(request: HttpRequest) -> Tuple[date, date]:
+    """
+    Default: last 30 days.
+    """
+    today = timezone.localdate()
+    d_to = _parse_date(request.GET.get("date_to")) or today
+    d_from = _parse_date(request.GET.get("date_from")) or (d_to - timedelta(days=30))
+    if d_from > d_to:
+        d_from, d_to = d_to, d_from
+    return d_from, d_to
+
+
+def _apply_location_filters_to_qs(request: HttpRequest, qs):
+    """
+    Optional filters:
+    - aimag_id
+    - location_type
+    """
+    aimag_id = request.GET.get("aimag_id")
     if aimag_id:
-        return qs.filter(**{field_name: aimag_id})
-    
+        try:
+            qs = qs.filter(aimag_ref_id=int(aimag_id))
+        except Exception:
+            pass
+
+    location_type = request.GET.get("location_type")
+    if location_type and _field_exists(Location, "location_type"):
+        qs = qs.filter(location_type=location_type)
+
     return qs
 
-# ---------------------------------------------------------
-# 2. Chart Builders
-# ---------------------------------------------------------
 
-def _build_workflow_counts_for_range(user, devices_qs, date_from: date, date_to: date):
-    ms_qs = MaintenanceService.objects.filter(device__in=devices_qs, date__gte=date_from, date__lte=date_to)
-    ca_qs = ControlAdjustment.objects.filter(device__in=devices_qs, date__gte=date_from, date__lte=date_to)
-
-    ms_dates = ms_qs.values_list("date", flat=True)
-    ca_dates = ca_qs.values_list("date", flat=True)
-
-    ms_counts = {}
-    for d_val in ms_dates:
-        if not d_val: continue
-        real_date = d_val.date() if isinstance(d_val, datetime) else d_val
-        ms_counts[real_date] = ms_counts.get(real_date, 0) + 1
-
-    ca_counts = {}
-    for d_val in ca_dates:
-        if not d_val: continue
-        real_date = d_val.date() if isinstance(d_val, datetime) else d_val
-        ca_counts[real_date] = ca_counts.get(real_date, 0) + 1
-
-    axis, ms, ca = [], [], []
-    d = date_from
-    while d <= date_to:
-        axis.append(d.strftime("%Y-%m-%d"))
-        ms.append(int(ms_counts.get(d, 0)))
-        ca.append(int(ca_counts.get(d, 0)))
-        d += timedelta(days=1)
-
-    return {"axis": axis, "ms": ms, "ca": ca}
-
-def _build_status_timeline(user, devices_qs, date_from: date, date_to: date):
-    qs = devices_qs.filter(installation_date__gte=date_from, installation_date__lte=date_to)
-    data = qs.values_list("installation_date", "status")
-    counts = {}
-    
-    for dt_val, status_val in data:
-        if not dt_val: continue
-        real_date = dt_val.date() if isinstance(dt_val, datetime) else dt_val
-        d_str = real_date.strftime("%Y-%m-%d")
-        st = str(status_val or "UNKNOWN")
-        
-        if d_str not in counts:
-            counts[d_str] = {"Active": 0, "Broken": 0, "Repair": 0, "Stored": 0, "Other": 0}
-            
-        if st in ["Active", "Broken", "Repair", "Stored"]:
-            counts[d_str][st] += 1
-        else:
-            counts[d_str]["Other"] += 1
-
-    axis = []
-    series = {"Active": [], "Broken": [], "Repair": [], "Stored": []}
-    
-    curr = date_from
-    while curr <= date_to:
-        d_str = curr.strftime("%Y-%m-%d")
-        axis.append(d_str)
-        day_data = counts.get(d_str, {})
-        series["Active"].append(day_data.get("Active", 0))
-        series["Broken"].append(day_data.get("Broken", 0))
-        series["Repair"].append(day_data.get("Repair", 0))
-        series["Stored"].append(day_data.get("Stored", 0))
-        curr += timedelta(days=1)
-        
-    return {"axis": axis, "series": series}
+def _apply_device_filters_to_qs(request: HttpRequest, qs):
+    """
+    Optional filters:
+    - kind
+    """
+    kind = request.GET.get("kind")
+    if kind and _field_exists(Device, "kind"):
+        qs = qs.filter(kind=kind)
+    return qs
 
 
-# ---------------------------------------------------------
-# 3. Main Views (Graphs & Dashboard)
-# ---------------------------------------------------------
-
-@staff_member_required(login_url="/django-admin/login/")
-def dashboard_graph_view(request: HttpRequest):
+# -----------------------------
+# Core data builders (single JSON schema)
+# -----------------------------
+def build_graph_payload(request: HttpRequest) -> Dict[str, Any]:
     user = request.user
-    ctx = build_dashboard_context(user)
+    date_from, date_to = _date_range_from_request(request)
 
-    today = timezone.localdate()
-    date_from = _parse_date(request.GET.get("date_from")) or (today - timedelta(days=30))
-    date_to = _parse_date(request.GET.get("date_to")) or today
-    if date_from > date_to:
-        date_from, date_to = date_to, date_from
+    # Role scope (AimagEngineer)
+    scoped_aimag_id = _get_user_aimag_id(user) if _is_aimag_engineer(user) else None
 
-    devices_qs = Device.objects.all()
+    # -----------------
+    # Locations (for map + aimag breakdown)
+    # -----------------
+    loc_qs = Location.objects.all()
+    loc_qs = _apply_location_filters_to_qs(request, loc_qs)
 
-    # Filters
-    f_status = request.GET.get("status")
-    f_kind = request.GET.get("kind")
-    f_loc_type = request.GET.get("location_type")
+    if scoped_aimag_id:
+        # enforce aimag scope
+        if _field_exists(Location, "aimag_ref"):
+            loc_qs = loc_qs.filter(aimag_ref_id=scoped_aimag_id)
 
-    if f_status: devices_qs = devices_qs.filter(status=f_status)
-    if f_kind: devices_qs = devices_qs.filter(kind=f_kind)
-    if f_loc_type: devices_qs = devices_qs.filter(location__type=f_loc_type)
+    # lat/lon fields (best-effort)
+    lat_f = _pick_field(Location, ["lat", "latitude", "y"])
+    lon_f = _pick_field(Location, ["lon", "lng", "longitude", "x"])
+    name_f = _pick_field(Location, ["name", "title"])
+    type_f = _pick_field(Location, ["location_type", "kind", "type"])
 
-    if build_calibration_counts:
-        cal = build_calibration_counts(user) or {}
-        ctx.update(cal)
+    # -----------------
+    # Devices by kind (bar)
+    # -----------------
+    dev_qs = Device.objects.all()
+    if _field_exists(Device, "location_id") and scoped_aimag_id and _field_exists(Location, "aimag_ref"):
+        dev_qs = dev_qs.filter(location__aimag_ref_id=scoped_aimag_id)
 
-    # 1. Status Chart
-    status_timeline = _build_status_timeline(user, devices_qs, date_from, date_to)
-    ctx["devices_by_status_json"] = json.dumps(status_timeline, ensure_ascii=False, cls=DjangoJSONEncoder)
+    dev_qs = _apply_device_filters_to_qs(request, dev_qs)
 
-    # 2. Workflow Chart
-    wf = _build_workflow_counts_for_range(user, devices_qs, date_from, date_to)
-    ctx["workflow_json"] = json.dumps(wf, ensure_ascii=False, cls=DjangoJSONEncoder)
+    # time window (if Device has created_at / registered_at / commissioned_date etc.)
+    dev_date_f = _pick_field(Device, ["created_at", "registered_at", "commissioned_date", "date_created"])
+    if dev_date_f:
+        # inclusive range
+        dev_qs = dev_qs.filter(**{f"{dev_date_f}__date__gte": date_from, f"{dev_date_f}__date__lte": date_to})
 
-    # 3. Map Points Logic
-    points = []
-    for d in devices_qs.select_related("location"):
-        loc = _get_device_location(d)
-        if not loc: continue
-        
-        raw_lat = _get_attr_any(loc, "latitude", "lat", "gps_latitude", "y", "geo_lat", "north")
-        raw_lon = _get_attr_any(loc, "longitude", "lon", "lng", "gps_longitude", "x", "geo_lon", "east")
-        lat = _safe_float(raw_lat)
-        lon = _safe_float(raw_lon)
+    kind_f = _pick_field(Device, ["kind", "device_type", "category"])
+    if kind_f:
+        by_kind = list(
+            dev_qs.values(kind_f).annotate(cnt=Count("id")).order_by("-cnt")[:30]
+        )
+        echarts_kind = [{"name": (r.get(kind_f) or "—"), "value": r["cnt"]} for r in by_kind]
+    else:
+        echarts_kind = []
 
-        if lat is None or lon is None or (lat == 0 and lon == 0): continue
-        
-        p_type = getattr(d, "kind", None) or "OTHER"
-        p_status = getattr(d, "status", None) or "Active"
-        p_pending = 1 if str(p_status) in ["Broken", "Repair"] else 0
+    # -----------------
+    # Workflow stacked (Maintenance + Control)
+    # -----------------
+    # status fields (best-effort)
+    m_status_f = _pick_field(MaintenanceService, ["status", "workflow_status", "state"])
+    c_status_f = _pick_field(ControlAdjustment, ["status", "workflow_status", "state"])
+    m_dt_f = _pick_field(MaintenanceService, ["created_at", "submitted_at", "date_created", "requested_at"])
+    c_dt_f = _pick_field(ControlAdjustment, ["created_at", "submitted_at", "date_created", "requested_at"])
 
-        points.append({
-            "id": d.pk,
-            "name": getattr(d, "serial_number", None) or str(d),
-            "lat": lat, "lon": lon,
-            "type": str(p_type), "status": str(p_status),
-            "pending_total": int(p_pending),
-        })
-    
-    ctx["locations_json"] = json.dumps(points, ensure_ascii=False, cls=DjangoJSONEncoder)
-    ctx.setdefault("dashboard_spec_json", "{}")
+    def _filter_by_dates(qs, dt_field):
+        if not dt_field:
+            return qs
+        return qs.filter(**{f"{dt_field}__date__gte": date_from, f"{dt_field}__date__lte": date_to})
 
-    # AJAX Response
-    if request.GET.get("ajax") == "1":
-        return JsonResponse({
-            "devices_by_status": status_timeline,
-            "workflow": wf,
-            "locations": points,
-        }, json_dumps_params={"ensure_ascii": False, "cls": DjangoJSONEncoder})
-    
-    ctx.update({
-        "filter_date_from": date_from.isoformat(),
-        "filter_date_to": date_to.isoformat(),
-        "filter_status": f_status or "",
-        "filter_kind": f_kind or "",
-        "filter_location_type": f_loc_type or "",
-    })
+    m_qs = MaintenanceService.objects.all()
+    c_qs = ControlAdjustment.objects.all()
 
-    return render(request, "admin/inventory/reports/dashboard_graph.html", ctx)
+    # scope to aimag via related device/location if available
+    if scoped_aimag_id:
+        if _field_exists(MaintenanceService, "device_id") and _field_exists(Device, "location_id") and _field_exists(Location, "aimag_ref"):
+            m_qs = m_qs.filter(device__location__aimag_ref_id=scoped_aimag_id)
+        if _field_exists(ControlAdjustment, "device_id") and _field_exists(Device, "location_id") and _field_exists(Location, "aimag_ref"):
+            c_qs = c_qs.filter(device__location__aimag_ref_id=scoped_aimag_id)
 
-@staff_member_required(login_url="/django-admin/login/")
-def dashboard_table_view(request: HttpRequest):
-    user = request.user
-    ctx = build_dashboard_context(user)
-    return render(request, "admin/inventory/reports/dashboard_table.html", ctx)
+    m_qs = _filter_by_dates(m_qs, m_dt_f)
+    c_qs = _filter_by_dates(c_qs, c_dt_f)
 
+    # normalize status buckets
+    def _norm_status(s: Optional[str]) -> str:
+        if not s:
+            return "UNKNOWN"
+        s2 = str(s).upper()
+        if "PEND" in s2 or "WAIT" in s2 or "NEED" in s2:
+            return "PENDING"
+        if "APPROV" in s2 or "DONE" in s2 or "OK" in s2 or "COMPLET" in s2:
+            return "APPROVED"
+        if "REJ" in s2 or "DECLIN" in s2:
+            return "REJECTED"
+        return s2[:30]
 
-# ---------------------------------------------------------
-# 4. Reports Table API (ReportsHub)
-# ---------------------------------------------------------
+    wf_counts = {"PENDING": 0, "APPROVED": 0, "REJECTED": 0, "UNKNOWN": 0}
 
-@staff_member_required(login_url="/django-admin/login/")
-def reports_table_json(request: HttpRequest):
-    report = _get_str(request, "report")
-    loc_type = _get_str(request, "location_type")
-    date_from = _get_str(request, "date_from")
-    date_to = _get_str(request, "date_to")
-    aimag_id = request.GET.get("aimag")
-    sum_id = request.GET.get("sum")
-    kind = _get_str(request, "kind")
-    status = _get_str(request, "status")
-    q = _get_str(request, "q")
+    if m_status_f:
+        for r in m_qs.values(m_status_f).annotate(cnt=Count("id")):
+            wf_counts[_norm_status(r.get(m_status_f))] = wf_counts.get(_norm_status(r.get(m_status_f)), 0) + r["cnt"]
+    if c_status_f:
+        for r in c_qs.values(c_status_f).annotate(cnt=Count("id")):
+            wf_counts[_norm_status(r.get(c_status_f))] = wf_counts.get(_norm_status(r.get(c_status_f)), 0) + r["cnt"]
 
-    rows = []
+    # stacked format for ECharts
+    echarts_workflow_stacked = [
+        {"name": "PENDING", "value": wf_counts.get("PENDING", 0)},
+        {"name": "APPROVED", "value": wf_counts.get("APPROVED", 0)},
+        {"name": "REJECTED", "value": wf_counts.get("REJECTED", 0)},
+        {"name": "UNKNOWN", "value": wf_counts.get("UNKNOWN", 0)},
+    ]
 
-    # ==========================
-    # DEVICES (СҮҮЛИЙН ХУВИЛБАР)
-    # ==========================
-    if report == "devices":
-        qs = Device.objects.select_related("location", "catalog_item")
-        qs = _apply_aimag_scope(qs, request, "location__aimag_ref_id")
+    # -----------------
+    # SLA buckets (based on age of PENDING items)
+    # < 30 days = OK, 30-90 = WARNING, > 90 = OVERDUE
+    # -----------------
+    now = timezone.now()
 
-        if aimag_id and str(aimag_id).isdigit():
-            qs = qs.filter(location__aimag_ref_id=int(aimag_id))
-        if sum_id and str(sum_id).isdigit():
-            qs = qs.filter(location__sum_ref_id=int(sum_id))
+    def _pending_qs(qs, status_field):
+        if not status_field:
+            return qs.none()
+        # try common pending tokens
+        return qs.filter(Q(**{status_field + "__icontains": "pend"}) | Q(**{status_field + "__icontains": "need"}))
 
-        if kind:
-            qs = qs.filter(kind=kind)
-        if status:
-            qs = qs.filter(status=status)
-        if loc_type:
-            qs = qs.filter(location__location_type=loc_type)
+    def _sla_bucket(qs, dt_field):
+        if not dt_field:
+            return {"OK": 0, "WARNING": 0, "OVERDUE": 0}
+        ok = 0
+        warn = 0
+        over = 0
+        # only check last N rows to stay fast; adjust if needed
+        for row in qs.values(dt_field)[:5000]:
+            dt = row.get(dt_field)
+            if not dt:
+                continue
+            age = (now - dt).days
+            if age < 30:
+                ok += 1
+            elif age < 90:
+                warn += 1
+            else:
+                over += 1
+        return {"OK": ok, "WARNING": warn, "OVERDUE": over}
 
-        if q:
-            q = q.strip()
-            qs = qs.filter(
-                Q(serial_number__icontains=q) |
-                Q(location__name__icontains=q) |
-                Q(catalog_item__name__icontains=q) |
-                Q(other_name__icontains=q)
+    m_pending = _pending_qs(m_qs, m_status_f)
+    c_pending = _pending_qs(c_qs, c_status_f)
+    m_sla = _sla_bucket(m_pending, m_dt_f)
+    c_sla = _sla_bucket(c_pending, c_dt_f)
+
+    echarts_sla = [
+        {"name": "OK", "value": int(m_sla["OK"] + c_sla["OK"])},
+        {"name": "WARNING", "value": int(m_sla["WARNING"] + c_sla["WARNING"])},
+        {"name": "OVERDUE", "value": int(m_sla["OVERDUE"] + c_sla["OVERDUE"])},
+    ]
+
+    # -----------------
+    # Aimag breakdown (bar)
+    # -----------------
+    echarts_aimag: List[Dict[str, Any]] = []
+    if _field_exists(Location, "aimag_ref"):
+        # count locations per aimag within filters/scope
+        aimag_counts = list(loc_qs.values("aimag_ref_id").annotate(cnt=Count("id")).order_by("-cnt"))
+        for r in aimag_counts[:50]:
+            echarts_aimag.append({"name": str(r["aimag_ref_id"]), "value": r["cnt"]})
+
+    # -----------------
+    # Map points
+    # -----------------
+    points: List[Dict[str, Any]] = []
+    if lat_f and lon_f:
+        for loc in loc_qs.only("id", *(f for f in [lat_f, lon_f, name_f, type_f] if f) )[:3000]:
+            lat = getattr(loc, lat_f, None)
+            lon = getattr(loc, lon_f, None)
+            if lat is None or lon is None:
+                continue
+            points.append(
+                {
+                    "id": loc.id,
+                    "name": getattr(loc, name_f, None) if name_f else f"Location #{loc.id}",
+                    "location_type": getattr(loc, type_f, None) if type_f else None,
+                    "lat": float(lat),
+                    "lon": float(lon),
+                }
             )
 
-        for d in qs.order_by("-id")[:500]:
-            updated = getattr(d, "updated_at", None)
-            cat = d.catalog_item.name if d.catalog_item_id else ""
-            rows.append({
-                "c1": d.id,
-                "c2": d.serial_number or "",
-                "c3": str(d.location or ""),
-                "c4": d.kind,
-                "c5": d.status,
-                "c6": cat or (d.other_name or ""),
-                "c7": str(updated) if updated else "",
-            })
-            
-    # ==========================
-    # LOCATIONS
-    # ==========================
-    elif report == "locations":
-        qs = Location.objects.select_related("aimag_ref", "sum_ref")
-        qs = _apply_aimag_scope(qs, request, "aimag_ref_id")
-
-        if aimag_id and str(aimag_id).isdigit(): qs = qs.filter(aimag_ref_id=int(aimag_id))
-        if sum_id and str(sum_id).isdigit(): qs = qs.filter(sum_ref_id=int(sum_id))
-        if loc_type: qs = qs.filter(location_type=loc_type)
-        if q: qs = qs.filter(name__icontains=q)
-
-        for l in qs.order_by("-id")[:500]:
-            rows.append({
-                "c1": l.id,
-                "c2": l.name,
-                "c3": l.location_type,
-                "c4": str(l.aimag_ref or ""),
-                "c5": str(l.sum_ref or ""),
-                "c6": l.code or ""
-            })
-
-    # ==========================
-    # MOVEMENTS
-    # ==========================
-    elif report == "movements":
-        qs = DeviceMovement.objects.select_related("device", "from_location", "to_location")
-        qs = _apply_aimag_scope(qs, request, "to_location__aimag_ref_id")
-
-        if date_from: qs = qs.filter(moved_at__gte=date_from)
-        if date_to: qs = qs.filter(moved_at__lte=date_to)
-        if loc_type:
-            qs = qs.filter(Q(to_location__location_type=loc_type) | Q(device__location__location_type=loc_type))
-        
-        if aimag_id and str(aimag_id).isdigit(): qs = qs.filter(to_location__aimag_ref_id=int(aimag_id))
-        if q: qs = qs.filter(device__serial_number__icontains=q)
-
-        for m in qs.order_by("-moved_at", "-id")[:500]:
-            rows.append({
-                "c1": m.moved_at.strftime("%Y-%m-%d") if m.moved_at else "-",
-                "c2": str(m.device),
-                "c3": str(m.from_location or "-"),
-                "c4": str(m.to_location or "-"),
-                "c5": m.reason or "",
-                "c6": str(m.moved_by or "")
-            })
-
-    # ==========================
-    # MAINTENANCE
-    # ==========================
-    elif report == "maintenance":
-        qs = MaintenanceService.objects.select_related("device", "device__location")
-        qs = _apply_aimag_scope(qs, request, "device__location__aimag_ref_id")
-
-        if date_from: qs = qs.filter(date__gte=date_from)
-        if date_to: qs = qs.filter(date__lte=date_to)
-        if loc_type: qs = qs.filter(device__location__location_type=loc_type)
-        if aimag_id and str(aimag_id).isdigit(): qs = qs.filter(device__location__aimag_ref_id=int(aimag_id))
-        if status: qs = qs.filter(workflow_status=status)
-        if q: qs = qs.filter(device__serial_number__icontains=q)
-
-        for x in qs.order_by("-date", "-id")[:500]:
-            rows.append({
-                "c1": x.date.strftime("%Y-%m-%d") if x.date else "-",
-                "c2": str(x.device),
-                "c3": x.workflow_status,
-                "c4": x.performer_type,
-                "c5": x.reason or ""
-            })
-
-    # ==========================
-    # CONTROL
-    # ==========================
-    elif report == "control":
-        qs = ControlAdjustment.objects.select_related("device", "device__location")
-        qs = _apply_aimag_scope(qs, request, "device__location__aimag_ref_id")
-
-        if date_from: qs = qs.filter(date__gte=date_from)
-        if date_to: qs = qs.filter(date__lte=date_to)
-        if loc_type: qs = qs.filter(device__location__location_type=loc_type)
-        if aimag_id and str(aimag_id).isdigit(): qs = qs.filter(device__location__aimag_ref_id=int(aimag_id))
-        if status: qs = qs.filter(workflow_status=status)
-        if q: qs = qs.filter(device__serial_number__icontains=q)
-
-        for x in qs.order_by("-date", "-id")[:500]:
-            rows.append({
-                "c1": x.date.strftime("%Y-%m-%d") if x.date else "-",
-                "c2": str(x.device),
-                "c3": x.workflow_status,
-                "c4": x.result,
-                "c5": x.performer_type
-            })
-
-    return JsonResponse(rows, safe=False)
+    return {
+        "meta": {
+            "date_from": str(date_from),
+            "date_to": str(date_to),
+            "scoped_aimag_id": scoped_aimag_id,
+        },
+        # ✅ single, stable schema:
+        "echarts_workflow_stacked": echarts_workflow_stacked,
+        "echarts_sla": echarts_sla,
+        "echarts_aimag": echarts_aimag,
+        "echarts_kind": echarts_kind,
+        "locations": points,
+    }
 
 
-# --- EXPORTS & API (Legacy) ---
-@staff_member_required(login_url="/django-admin/login/")
-def export_devices_csv(request: HttpRequest):
-    response = HttpResponse(content_type='text/csv')
-    response['Content-Disposition'] = 'attachment; filename="devices.csv"'
-    writer = csv.writer(response)
-    writer.writerow(['ID', 'Serial Number', 'Status', 'Location', 'Type', 'Updated'])
-    for d in Device.objects.all().select_related('location'):
-        writer.writerow([d.id, d.serial_number, d.status, d.location.name if d.location else "", getattr(d,'kind',''), d.updated_at if hasattr(d,'updated_at') else ''])
-    return response
+# -----------------------------
+# Views
+# -----------------------------
+@staff_member_required
+def dashboard_graph_view(request: HttpRequest):
+    """
+    HTML page by default.
+    If ?ajax=1 -> JSON payload (single schema).
+    """
+    if request.GET.get("ajax") == "1":
+        payload = build_graph_payload(request)
+        return JsonResponse(payload, encoder=DjangoJSONEncoder)
 
-@staff_member_required(login_url="/django-admin/login/")
-def export_devices_xlsx(request: HttpRequest):
-    if not openpyxl: return HttpResponse("No openpyxl", status=500)
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename="devices.xlsx"'
-    wb = openpyxl.Workbook(); ws = wb.active; ws.append(['ID', 'Serial', 'Status', 'Location'])
-    for d in Device.objects.all().select_related('location'):
-        ws.append([d.id, d.serial_number, d.status, d.location.name if d.location else ""])
-    wb.save(response)
-    return response
+    date_from, date_to = _date_range_from_request(request)
+    ctx = {
+        "date_from": str(date_from),
+        "date_to": str(date_to),
+    }
+    return render(request, "admin/dashboard_graph.html", ctx)
 
-@staff_member_required(login_url="/django-admin/login/")
-def export_maintenance_csv(request: HttpRequest):
-    response = HttpResponse(content_type='text/csv')
-    response['Content-Disposition'] = 'attachment; filename="maintenance.csv"'
-    writer = csv.writer(response)
-    writer.writerow(['ID', 'Date', 'Device', 'Status'])
-    for ms in MaintenanceService.objects.all():
-        writer.writerow([ms.id, ms.date, str(ms.device), getattr(ms,'workflow_status','')])
-    return response
 
-@staff_member_required(login_url="/django-admin/login/")
-def export_movements_csv(request: HttpRequest):
-    return HttpResponse("Not implemented", content_type='text/csv')
+@staff_member_required
+def workflow_pending_counts(request):
+    """
+    GET /django-admin/inventory/workflow/pending-counts/
+    """
+    from .models import MaintenanceService, ControlAdjustment, DeviceMovement
 
-@staff_member_required(login_url="/django-admin/login/")
-def chart_status_json(request: HttpRequest):
-    devices_qs = Device.objects.all()
-    if request.GET.get("kind"): devices_qs = devices_qs.filter(kind=request.GET.get("kind"))
-    status_counts = list(devices_qs.values("status").annotate(c=Count("id")).order_by("status"))
-    return JsonResponse([{"name": (r["status"] or "UNKNOWN"), "value": int(r["c"] or 0)} for r in status_counts], safe=False)
+    # Танайх workflow_status ашиглаж байна
+    pending_statuses = ["PENDING", "NEED_APPROVAL", "SUBMITTED", "REVIEW"]
 
-@staff_member_required(login_url="/django-admin/login/")
-def chart_workflow_json(request: HttpRequest):
-    user = request.user
-    today = timezone.localdate()
-    date_from = _parse_date(request.GET.get("date_from")) or (today - timedelta(days=30))
-    date_to = _parse_date(request.GET.get("date_to")) or today
-    devices_qs = Device.objects.all()
-    wf_data = _build_workflow_counts_for_range(user, devices_qs, date_from, date_to)
-    return JsonResponse(wf_data, safe=False, json_dumps_params={"ensure_ascii": False})
-# ---------------------------------------------------------------------
-# PATCH 3.x COMPAT ALIASES
-# admin.py expects these names
-# ---------------------------------------------------------------------
-workflow_pending = workflow_pending_dashboard
-workflow_audit = workflow_audit_log
+    ms = MaintenanceService.objects.filter(workflow_status__in=pending_statuses).count()
+
+    # ControlAdjustment дээр workflow_status байхгүй байж магадгүй тул try хамгаалалттай
+    try:
+        ca = ControlAdjustment.objects.filter(workflow_status__in=pending_statuses).count()
+    except Exception:
+        ca = 0
+
+    # DeviceMovement дээр workflow_status байхгүй байж магадгүй
+    try:
+        mv = DeviceMovement.objects.filter(workflow_status__in=pending_statuses).count()
+    except Exception:
+        mv = 0
+
+    return JsonResponse({
+        "maintenance_pending": ms,
+        "control_pending": ca,
+        "movement_pending": mv,
+        "total_pending": ms + ca + mv,
+    })
+    return render(request, "admin/dashboard_graph.html", ctx)
+
+

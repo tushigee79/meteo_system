@@ -40,11 +40,11 @@
     <div class="locmap-embed-head">
       <div class="locmap-embed-title">📍 Улсын сүлжээний газрын зураг</div>
       <div class="locmap-embed-actions">
-        <a href="{% url 'inventory:inventory_map' %}" target="_blank" rel="noopener">Газрын зургийг тусад нь нээх</a>
+        <a href="{% url 'admin:inventory_map' %}" target="_blank" rel="noopener">Газрын зургийг тусад нь нээх</a>
       </div>
     </div>
     <iframe class="locmap-embed-iframe"
-            src="{% url 'inventory:inventory_map' %}"
+            src="{% url 'admin:inventory_map' %}"
             loading="lazy"></iframe>
   </div>
   {{ block.super }}

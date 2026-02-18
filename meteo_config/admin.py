@@ -1,16 +1,18 @@
+# meteo_config/admin.py
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 import json
 
+from django.conf import settings
 from django.contrib import admin
 from django.db.models import Count, Q, QuerySet, F
 from django.http import HttpRequest, JsonResponse
-from django.shortcuts import render
+from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils.html import format_html
 
-from .models import (
+from inventory.models import (  # ✅ your main app models
     Aimag,
     SumDuureg,
     Organization,
@@ -27,28 +29,44 @@ from .models import (
     AuthAuditLog,
 )
 
-# Optional
+# Optional model
 try:
-    from .models import AuditEvent  # type: ignore
+    from inventory.models import AuditEvent  # type: ignore
 except Exception:
     AuditEvent = None  # type: ignore
-
 
 
 # ============================================================
 # Admin list filters (enterprise)
 # ============================================================
 
+class AimagFilter(admin.SimpleListFilter):
+    title = "Аймаг"
+    parameter_name = "aimag_ref__id__exact"
+
+    def lookups(self, request: HttpRequest, model_admin):
+        qs = Aimag.objects.all().order_by("name")
+        return [(str(a.id), a.name) for a in qs]
+
+    def queryset(self, request: HttpRequest, queryset: QuerySet):
+        v = self.value()
+        if v:
+            return queryset.filter(aimag_ref_id=v)
+        return queryset
+
+
 class SumDuuregByAimagFilter(admin.SimpleListFilter):
     """Cascading Sum/Duureg filter: shows options only for selected Aimag."""
     title = "Сум/Дүүрэг"
     parameter_name = "sum_ref__id__exact"
 
-    def lookups(self, request, model_admin):
+    def lookups(self, request: HttpRequest, model_admin):
         aimag_id = (request.GET.get("aimag_ref__id__exact") or "").strip()
         if not aimag_id:
             return []
+
         qs = SumDuureg.objects.filter(aimag_id=aimag_id).order_by("name")
+
         # If model has is_ub_district and aimag is UB, show only districts; else show non-district sums.
         try:
             is_ub = Aimag.objects.filter(id=aimag_id, is_ub=True).exists()
@@ -56,21 +74,36 @@ class SumDuuregByAimagFilter(admin.SimpleListFilter):
                 qs = qs.filter(is_ub_district=True) if is_ub else qs.filter(is_ub_district=False)
         except Exception:
             pass
-        return [(str(o.id), getattr(o, "name_mn", None) or str(o)) for o in qs[:500]]
 
-    def queryset(self, request, queryset):
-        val = self.value()
-        if val:
-            return queryset.filter(sum_ref_id=val)
+        return [(str(o.id), getattr(o, "name_mn", None) or getattr(o, "name", None) or str(o)) for o in qs[:800]]
+
+    def queryset(self, request: HttpRequest, queryset: QuerySet):
+        v = self.value()
+        if v:
+            return queryset.filter(sum_ref_id=v)
         return queryset
 
+
+class OrganizationFilter(admin.SimpleListFilter):
+    title = "Байгууллага"
+    parameter_name = "owner_org__id__exact"
+
+    def lookups(self, request: HttpRequest, model_admin):
+        qs = Organization.objects.all().order_by("name")
+        return [(str(o.id), o.name) for o in qs[:1200]]
+
+    def queryset(self, request: HttpRequest, queryset: QuerySet):
+        v = self.value()
+        if v:
+            return queryset.filter(owner_org_id=v)
+        return queryset
 
 
 class LocationTypeFilter(admin.SimpleListFilter):
     title = "Байршлын төрөл"
     parameter_name = "location_type"  # DB field
 
-    def lookups(self, request, model_admin):
+    def lookups(self, request: HttpRequest, model_admin):
         # Location дээр choices байвал тэрийг ашиглана
         choices = getattr(Location, "LOCATION_TYPE_CHOICES", None) or getattr(Location, "TYPE_CHOICES", None)
 
@@ -89,11 +122,70 @@ class LocationTypeFilter(admin.SimpleListFilter):
             ("OTHER", "Бусад"),
         ]
 
-    def queryset(self, request, queryset):
+    def queryset(self, request: HttpRequest, queryset: QuerySet):
         v = self.value()
         if not v:
             return queryset
         return queryset.filter(location_type=v)
+    
+class InventoryAdminSite(AdminSite):
+    site_header = "БҮРТГЭЛ - Админ"
+    site_title = "БҮРТГЭЛ"
+    index_title = "Удирдлага"
+
+    def get_urls(self):
+        urls = super().get_urls()
+
+        from inventory import admin_workflow as wf
+
+        custom = [
+            path(
+                "inventory/workflow/pending-counts/",
+                self.admin_view(wf.workflow_pending_counts),
+                name="workflow_pending_counts",
+            ),
+            path("debug-hello/", self.admin_view(lambda r: HttpResponse("HELLO")), name="debug_hello"),
+
+            # ✅ Хэрвээ AdminSite дээр map route хэрэгтэй бол:
+            path("inventory/location/map/", self.admin_view(self.map_view), name="inventory_location_map"),
+            path("inventory/location/map/one/", self.admin_view(self.map_one_view), name="inventory_location_map_one"),
+        ]
+        return custom + urls
+
+    def map_view(self, request: HttpRequest):
+        return TemplateResponse(request, "inventory/admin/location_map_embed.html", {
+            "title": "Газрын зураг",
+            "map_url": reverse("inventory:inventory_map"),
+        })
+
+    def map_one_view(self, request: HttpRequest):
+        return TemplateResponse(request, "inventory/admin/location_map_one_embed.html", {
+            "title": "Газрын зураг (нэг)",
+            "map_url": reverse("station_map_one"),
+        })
+# inventory/admin.py (төөгсгөлд нь)
+from django.contrib.admin.sites import AlreadyRegistered
+
+def register_with(site):
+    """
+    Custom AdminSite дээр (inventory_admin_site гэх мэт) бүх ModelAdmin-уудыг дахин register хийх.
+    admin.py өөрөө admin_site.py-г импортлохгүй байх ёстой!
+    """
+    # ЖИЧ: Доорх model/admin class-ууд таны admin.py дээр аль хэдийн тодорхойлогдсон гэж үзэж байна.
+
+    try:
+        site.register(Device, DeviceAdmin)
+    except AlreadyRegistered:
+        pass
+
+    try:
+        site.register(Location, LocationAdmin)
+    except AlreadyRegistered:
+        pass
+
+    # ... (адилхан бусад модель/админуудаа энд нэм)
+
+
 # ============================================================
 # Scope helpers (аймгийн инженер зөвхөн өөрийн аймаг)
 # ============================================================
@@ -124,11 +216,12 @@ def _scope_qs(request: HttpRequest, qs: QuerySet, *, aimag_field: str) -> QueryS
 
     qs = qs.filter(**{f"{aimag_field}_id": aimag_id})
 
+    # UB only: optionally scope by district/sum if your data uses it
     sum_id = scope.get("sum_id")
     if aimag_id == 1 and sum_id:
         if aimag_field.endswith("aimag_ref") and hasattr(qs.model, "sum_ref_id"):
             qs = qs.filter(sum_ref_id=sum_id)
-        elif "location__" in aimag_field:
+        elif "location__" in aimag_field and hasattr(qs.model, "device"):
             qs = qs.filter(device__location__sum_ref_id=sum_id)
     return qs
 
@@ -144,6 +237,47 @@ def _scope_location_qs(request: HttpRequest) -> QuerySet[Location]:
     if scope["aimag_id"] == 1 and scope["sum_id"]:
         qs = qs.filter(sum_ref_id=scope["sum_id"])
     return qs
+
+
+# ============================================================
+# Map payload helper (used by location changelist map template)
+# ============================================================
+
+def _build_locations_payload(qs: QuerySet[Location]) -> List[Dict[str, Any]]:
+    """
+    Safe, template-friendly payload.
+    The template can ignore keys it doesn't need.
+    """
+    out: List[Dict[str, Any]] = []
+
+    for loc in qs:
+        lat = getattr(loc, "latitude", None)
+        lon = getattr(loc, "longitude", None)
+        if lat is None or lon is None:
+            continue
+
+        try:
+            change_url = reverse("admin:inventory_location_change", args=[loc.id])
+        except Exception:
+            change_url = ""
+
+        out.append({
+            "id": loc.id,
+            "name": getattr(loc, "name", "") or "",
+            "location_type": getattr(loc, "location_type", "") or "",
+            "aimag": getattr(getattr(loc, "aimag_ref", None), "name", "") or "",
+            "sum": getattr(getattr(loc, "sum_ref", None), "name", "") or "",
+            "district_name": getattr(loc, "district_name", "") or "",
+            "wmo_index": getattr(loc, "wmo_index", "") or "",
+            "code": getattr(loc, "code", "") or "",
+            "lat": float(lat),
+            "lon": float(lon),
+            "device_count": int(getattr(loc, "device_count", 0) or 0),
+            "pending_total": int(getattr(loc, "pending_total", 0) or 0),
+            "admin_change_url": change_url,
+        })
+
+    return out
 
 
 # ============================================================
@@ -206,27 +340,22 @@ class SparePartItemInline(admin.TabularInline):
 
 
 # ============================================================
-# Master tables
-# ============================================================
-
-
-# ============================================================
-# ✅ Global filters (Aimag/UB, Sum/Duureg, Kind) for ALL modules
+# Global filters (Aimag/UB, Sum/Duureg, Kind) for ALL modules
 # - Works with URL params: ?aimag=<id>&sum=<id>&kind=<KIND>
 # - Compatible aliases: aimag_id, sum_id, location_type
 # ============================================================
 
 class GlobalAdminFilterMixin:
-    """Reusable filtering for admin changelists (production-safe).
+    """
+    Reusable filtering for admin changelists (production-safe).
     Configure on each ModelAdmin:
       aimag_path: str | None   (FK path to Aimag, e.g. 'location__aimag_ref')
       sum_path: str | None     (FK path to SumDuureg, e.g. 'location__sum_ref')
       kind_path: str | None    (field path for kind, e.g. 'kind' or 'device__kind')
     """
-
-    aimag_path: str | None = None
-    sum_path: str | None = None
-    kind_path: str | None = None
+    aimag_path: Optional[str] = None
+    sum_path: Optional[str] = None
+    kind_path: Optional[str] = None
 
     def _get_param(self, request: HttpRequest, *names: str) -> str:
         for n in names:
@@ -252,7 +381,6 @@ class GlobalAdminFilterMixin:
         return qs
 
     def changelist_view(self, request, extra_context=None):
-        # Provide common dropdown data for custom templates if they want it.
         extra_context = extra_context or {}
         try:
             extra_context.setdefault("AIMAG_CHOICES", list(Aimag.objects.order_by("name").values_list("id", "name")))
@@ -263,6 +391,11 @@ class GlobalAdminFilterMixin:
         except Exception:
             extra_context.setdefault("KIND_CHOICES", [])
         return super().changelist_view(request, extra_context=extra_context)
+
+
+# ============================================================
+# Master tables
+# ============================================================
 
 @admin.register(Aimag)
 class AimagAdmin(admin.ModelAdmin):
@@ -304,14 +437,12 @@ class InstrumentCatalogAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
 
 @admin.register(Location)
 class LocationAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
-
     aimag_path = "aimag_ref"
     sum_path = "sum_ref"
     kind_path = "location_type"
 
     change_list_template = "inventory/admin/location_changelist_with_map.html"
 
-    # ✅ Production list display (as you requested)
     list_display = (
         "name",
         "location_type",
@@ -330,39 +461,34 @@ class LocationAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
 
     search_fields = ("name", "wmo_index", "code")
     list_filter = (
-        "location_type",
+        LocationTypeFilter,
         AimagFilter,
-        SumDuuregFilter,
+        SumDuuregByAimagFilter,
         OrganizationFilter,
         "status",
     )
     ordering = ("aimag_ref__name", "sum_ref__name", "name")
 
-    # -------------------------
-    # Queryset annotations
-    # -------------------------
-    def get_queryset(self, request):
+    def get_queryset(self, request: HttpRequest):
         qs = super().get_queryset(request).select_related("aimag_ref", "sum_ref", "owner_org")
 
-        # scope by role/aimag if needed (uses your GlobalAdminFilterMixin helper)
+        # scope by role/aimag
         qs = _scope_qs(request, qs, aimag_field="aimag_ref")
 
         # device count
-        qs = qs.annotate(
-            device_count=Count("devices", distinct=True),
-        )
+        qs = qs.annotate(device_count=Count("devices", distinct=True))
 
-        # pending workflow counts (support multiple statuses)
-        PENDING_SET = ["SUBMITTED", "PENDING", "NEED_APPROVAL"]
+        # pending workflow counts
+        pending_set = ["SUBMITTED", "PENDING", "NEED_APPROVAL"]
         qs = qs.annotate(
             pending_maint=Count(
                 "devices__maintenanceservice",
-                filter=Q(devices__maintenanceservice__workflow_status__in=PENDING_SET),
+                filter=Q(devices__maintenanceservice__workflow_status__in=pending_set),
                 distinct=True,
             ),
             pending_control=Count(
                 "devices__controladjustment",
-                filter=Q(devices__controladjustment__workflow_status__in=PENDING_SET),
+                filter=Q(devices__controladjustment__workflow_status__in=pending_set),
                 distinct=True,
             ),
         ).annotate(
@@ -371,15 +497,12 @@ class LocationAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
 
         return qs
 
-    # -------------------------
-    # Columns
-    # -------------------------
     @admin.display(description="Багаж", ordering="device_count")
-    def device_count_col(self, obj):
+    def device_count_col(self, obj: Location):
         return getattr(obj, "device_count", 0) or 0
 
     @admin.display(description="Pending", ordering="pending_total")
-    def pending_badge_col(self, obj):
+    def pending_badge_col(self, obj: Location):
         pt = int(getattr(obj, "pending_total", 0) or 0)
         if pt <= 0:
             return format_html('<span style="color:#6b7280;">0</span>')
@@ -390,18 +513,17 @@ class LocationAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
         )
 
     @admin.display(description="🗺️ Харах")
-    def view_map_col(self, obj):
-        url = reverse("station_map_one") + f"?location_id={obj.id}"
+    def view_map_col(self, obj: Location):
+        try:
+            url = reverse("station_map_one") + f"?location_id={obj.id}"
+        except Exception:
+            url = ""
         return format_html('<a class="button" href="{}" target="_blank">Харах</a>', url)
 
-    # -------------------------
-    # Changelist map context
-    # -------------------------
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
 
-        # ✅ IMPORTANT: use filtered queryset from ChangeList, so kind/aimag/sum filters
-        # affect the MAP too (this is the issue you were seeing).
+        # Use filtered queryset from ChangeList so filters affect the map too
         try:
             cl = self.get_changelist_instance(request)
             qs = cl.get_queryset(request)
@@ -409,39 +531,34 @@ class LocationAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
             qs = self.get_queryset(request)
 
         extra_context["locations_json"] = json.dumps(_build_locations_payload(qs), ensure_ascii=False)
-        extra_context["map_url"] = reverse("inventory_map")  # full map route (outside admin)
+        extra_context["map_url"] = reverse("inventory:inventory_map")  # public map route (outside admin)
 
         return super().changelist_view(request, extra_context=extra_context)
-
-    # -------------------------
-    # Admin custom URLs (optional)
-    # -------------------------
-    def get_urls(self):
-        urls = super().get_urls()
-        custom = [
-            path("map/", self.admin_site.admin_view(self.map_view), name="inventory_location_map"),
-            path("map/one/", self.admin_site.admin_view(self.map_one_view), name="inventory_location_map_one"),
-        ]
-        return custom + urls
-
-    def map_view(self, request):
-        # This is an admin wrapper page (if you use it). It can render your public /inventory/map/
+  
+   
+       
+    def map_view(self, request: HttpRequest):
         return TemplateResponse(request, "inventory/admin/location_map_embed.html", {
             "title": "Газрын зураг",
-            "map_url": reverse("inventory_map"),
+            "map_url": reverse("inventory:inventory_map"),
         })
 
-    def map_one_view(self, request):
+    def map_one_view(self, request: HttpRequest):
         return TemplateResponse(request, "inventory/admin/location_map_one_embed.html", {
             "title": "Газрын зураг (нэг)",
             "map_url": reverse("station_map_one"),
         })
+
+
+# ============================================================
+# Device
+# ============================================================
+
 @admin.register(Device)
 class DeviceAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
-
-    aimag_path = 'location__aimag_ref'
-    sum_path = 'location__sum_ref'
-    kind_path = 'kind'
+    aimag_path = "location__aimag_ref"
+    sum_path = "location__sum_ref"
+    kind_path = "kind"
 
     list_display = ("serial_number", "kind", "location", "status")
     list_filter = ("kind", "status")
@@ -470,9 +587,7 @@ class DeviceAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
             qs = qs.filter(kind=kind)
         if hasattr(InstrumentCatalog, "is_active"):
             qs = qs.filter(is_active=True)
-        return JsonResponse(
-            {"results": [{"id": x.id, "text": f"{x.code} - {x.name_mn}"} for x in qs.order_by("code")]}
-        )
+        return JsonResponse({"results": [{"id": x.id, "text": f"{x.code} - {x.name_mn}"} for x in qs.order_by("code")]})
 
     def location_options_view(self, request: HttpRequest):
         aimag_id = (request.GET.get("aimag") or "").strip() or None
@@ -484,7 +599,7 @@ class DeviceAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
             qs = qs.filter(sum_ref_id=sum_id)
         return JsonResponse([{"id": l.id, "name": l.name} for l in qs], safe=False)
 
-    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+    def formfield_for_foreignkey(self, db_field, request: HttpRequest, **kwargs):
         if db_field.name == "location":
             kwargs["queryset"] = _scope_location_qs(request).order_by("name")
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
@@ -493,7 +608,7 @@ class DeviceAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
         qs = super().get_queryset(request).select_related("location")
         return _scope_qs(request, qs, aimag_field="location__aimag_ref")
 
-    def has_delete_permission(self, request, obj=None):
+    def has_delete_permission(self, request: HttpRequest, obj=None):
         return request.user.is_superuser
 
 
@@ -503,12 +618,18 @@ class DeviceAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
 
 @admin.register(MaintenanceService)
 class MaintenanceServiceAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
+    aimag_path = "device__location__aimag_ref"
+    sum_path = "device__location__sum_ref"
+    kind_path = "device__kind"
 
-    aimag_path = 'device__location__aimag_ref'
-    sum_path = 'device__location__sum_ref'
-    kind_path = 'device__kind'
-
-    list_display = ("date", "device", "workflow_status", "performer_type", "performer_engineer_name", "performer_org_name")
+    list_display = (
+        "date",
+        "device",
+        "workflow_status",
+        "performer_type",
+        "performer_engineer_name",
+        "performer_org_name",
+    )
     list_filter = ("workflow_status", "performer_type")
     search_fields = ("device__serial_number", "device__inventory_code", "reason", "note")
     ordering = ("-date", "-id")
@@ -521,18 +642,25 @@ class MaintenanceServiceAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
         qs = super().get_queryset(request).select_related("device", "device__location")
         return _scope_qs(request, qs, aimag_field="device__location__aimag_ref")
 
-    def has_delete_permission(self, request, obj=None):
+    def has_delete_permission(self, request: HttpRequest, obj=None):
         return request.user.is_superuser
 
 
 @admin.register(ControlAdjustment)
 class ControlAdjustmentAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
+    aimag_path = "device__location__aimag_ref"
+    sum_path = "device__location__sum_ref"
+    kind_path = "device__kind"
 
-    aimag_path = 'device__location__aimag_ref'
-    sum_path = 'device__location__sum_ref'
-    kind_path = 'device__kind'
-
-    list_display = ("date", "device", "result", "workflow_status", "performer_type", "performer_engineer_name", "performer_org_name")
+    list_display = (
+        "date",
+        "device",
+        "result",
+        "workflow_status",
+        "performer_type",
+        "performer_engineer_name",
+        "performer_org_name",
+    )
     list_filter = ("result", "workflow_status", "performer_type")
     search_fields = ("device__serial_number", "device__inventory_code", "note")
     ordering = ("-date", "-id")
@@ -545,7 +673,7 @@ class ControlAdjustmentAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
         qs = super().get_queryset(request).select_related("device", "device__location")
         return _scope_qs(request, qs, aimag_field="device__location__aimag_ref")
 
-    def has_delete_permission(self, request, obj=None):
+    def has_delete_permission(self, request: HttpRequest, obj=None):
         return request.user.is_superuser
 
 
@@ -555,8 +683,7 @@ class ControlAdjustmentAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
 
 @admin.register(SparePartOrder)
 class SparePartOrderAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
-
-    aimag_path = 'aimag'
+    aimag_path = "aimag"
 
     list_display = ("order_no", "aimag", "status", "created_at")
     list_filter = ("status", "aimag")
@@ -575,8 +702,7 @@ class SparePartOrderAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
-
-    aimag_path = 'aimag'
+    aimag_path = "aimag"
 
     list_display = ("user", "aimag", "org", "must_change_password")
     list_filter = ("aimag", "must_change_password")
@@ -600,22 +726,4 @@ if AuditEvent is not None:
         search_fields = ("actor__username", "action", "model_label", "object_id", "object_repr", "ip_address")
         ordering = ("-created_at", "-id")
 
-       
-# ============================================================
-# ✅ Custom AdminSite instance (meteo_config/urls.py үүнээс импортлоно)
-# ============================================================
-
-try:
-    InventoryAdminSite  # noqa: F401 (exists?)
-except NameError:
-    # Хэрвээ class нэр чинь өөр бол (ж: CustomAdminSite), доорх мөрийг өөрчилнө.
-    # Гэхдээ одоохондоо алдаа гарахгүйгээр босгохын тулд fallback хийнэ.
-    from django.contrib.admin import AdminSite
-
-    class InventoryAdminSite(AdminSite):
-        site_header = "БҮРТГЭЛ - Админ"
-        site_title = "БҮРТГЭЛ"
-        index_title = "Удирдлага"
-
-# ✅ Энэ объект заавал байх ёстой
-inventory_admin_site = InventoryAdminSite(name="inventory_admin")
+inventory_admin.register_with(inventory_admin_site)

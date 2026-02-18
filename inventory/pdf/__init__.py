@@ -1,11 +1,12 @@
-# inventory/pdf/pdf_passport.py
+﻿# inventory/pdf/pdf_passport.py
 from __future__ import annotations
 
 import io
-import uuid
+import os
+from datetime import datetime
 
 import qrcode
-from django.urls import reverse
+from django.utils import timezone
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
@@ -26,15 +27,18 @@ from inventory.pdf_passport import register_fonts
 
 
 def build_device_timeline(device, limit: int = 15):
+    """
+    Returns list of rows for timeline table.
+    """
     rows = []
 
-    # DeviceMovement
+    # DeviceMovement (if exists)
     try:
         qs = DeviceMovement.objects.filter(device=device).order_by("-moved_at")[:limit]
         for m in qs:
             dt = getattr(m, "moved_at", None) or getattr(m, "date", None)
             dt = dt.date().isoformat() if dt else ""
-            rows.append([dt, "Шилжилт", getattr(m, "reason", "") or ""])
+            rows.append([dt, "Ð¨Ð¸Ð»Ð¶Ð¸Ð»Ñ‚", getattr(m, "reason", "") or ""])
     except Exception:
         pass
 
@@ -44,7 +48,7 @@ def build_device_timeline(device, limit: int = 15):
         for s in qs:
             dt = getattr(s, "service_date", None)
             dt = dt.isoformat() if dt else ""
-            title = getattr(s, "service_type", "") or "Засвар"
+            title = getattr(s, "service_type", "") or "Ð—Ð°ÑÐ²Ð°Ñ€"
             note = getattr(s, "notes", "") or ""
             rows.append([dt, title, note])
     except Exception:
@@ -56,10 +60,11 @@ def build_device_timeline(device, limit: int = 15):
         for c in qs:
             dt = getattr(c, "adjusted_at", None) or getattr(c, "date", None)
             dt = dt.date().isoformat() if dt else ""
-            rows.append([dt, "Тохируулга", getattr(c, "notes", "") or ""])
+            rows.append([dt, "Ð¢Ð¾Ñ…Ð¸Ñ€ÑƒÑƒÐ»Ð³Ð°", getattr(c, "notes", "") or ""])
     except Exception:
         pass
 
+    # newest first
     rows.sort(key=lambda r: r[0], reverse=True)
     return rows[:limit]
 
@@ -80,23 +85,8 @@ def generate_device_passport_pdf_bytes(device, request=None) -> bytes:
     else:
         base_url = "http://127.0.0.1:8000"
 
-    # ✅ token байхгүй бол үүсгээд хадгал
     token = getattr(device, "qr_token", None)
-    if not token:
-        token = uuid.uuid4()
-        device.qr_token = token
-        try:
-            device.save(update_fields=["qr_token"])
-        except Exception:
-            device.save()
-
-    # ✅ URL-аа urls.py-ийн нэрээр гаргана (meteo_config/urls.py: name="qr_public")
-    try:
-        public_path = reverse("qr_public", args=[str(token)])
-    except Exception:
-        public_path = f"/qr/{token}/"
-
-    qr_url = f"{base_url}{public_path}"
+    qr_url = f"{base_url}/qr/public/{token}/" if token else base_url
 
     # styles
     styles = getSampleStyleSheet()
@@ -136,7 +126,7 @@ def generate_device_passport_pdf_bytes(device, request=None) -> bytes:
     )
 
     elements = []
-    elements.append(Paragraph("ТЕХНИКИЙН ПАСПОРТ", style_title))
+    elements.append(Paragraph("Ð¢Ð•Ð¥ÐÐ˜ÐšÐ˜Ð™Ð ÐŸÐÐ¡ÐŸÐžÐ Ð¢", style_title))
 
     # QR + Summary row
     qr_png = _make_qr_png_bytes(qr_url)
@@ -147,9 +137,9 @@ def generate_device_passport_pdf_bytes(device, request=None) -> bytes:
     status = getattr(device, "status", "") or ""
 
     summary = [
-        [Paragraph(f"<b>Төрөл:</b> {kind}", styles["Normal"])],
-        [Paragraph(f"<b>Инв №:</b> {inv}", styles["Normal"])],
-        [Paragraph(f"<b>Төлөв:</b> {status}", styles["Normal"])],
+        [Paragraph(f"<b>Ð¢Ó©Ñ€Ó©Ð»:</b> {kind}", styles["Normal"])],
+        [Paragraph(f"<b>Ð˜Ð½Ð² â„–:</b> {inv}", styles["Normal"])],
+        [Paragraph(f"<b>Ð¢Ó©Ð»Ó©Ð²:</b> {status}", styles["Normal"])],
     ]
     summary_tbl = Table(summary, colWidths=[12 * cm])
     summary_tbl.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
@@ -159,14 +149,14 @@ def generate_device_passport_pdf_bytes(device, request=None) -> bytes:
     elements.append(top_tbl)
     elements.append(Spacer(1, 10))
 
-    # Device details
-    elements.append(Paragraph("ҮНДСЭН МЭДЭЭЛЭЛ", style_h))
+    # Device details table (minimal, expand as needed)
+    elements.append(Paragraph("Ò®ÐÐ”Ð¡Ð­Ð ÐœÐ­Ð”Ð­Ð­Ð›Ð­Ð›", style_h))
     rows = [
         ["ID", str(getattr(device, "id", "") or "")],
-        ["Төрөл", kind],
-        ["Инв №", inv],
-        ["Серийн дугаар", str(getattr(device, "serial_number", "") or getattr(device, "serial_no", "") or "")],
-        ["Байршил", str(getattr(getattr(device, "location", None), "name", "") or "")],
+        ["Ð¢Ó©Ñ€Ó©Ð»", kind],
+        ["Ð˜Ð½Ð² â„–", inv],
+        ["Ð¡ÐµÑ€Ð¸Ð¹Ð½ Ð´ÑƒÐ³Ð°Ð°Ñ€", str(getattr(device, "serial_no", "") or "")],
+        ["Ð‘Ð°Ð¹Ñ€ÑˆÐ¸Ð»", str(getattr(getattr(device, "location", None), "name", "") or "")],
     ]
     t = Table(rows, colWidths=[5 * cm, 11 * cm])
     t.setStyle(
@@ -184,12 +174,12 @@ def generate_device_passport_pdf_bytes(device, request=None) -> bytes:
     elements.append(Spacer(1, 12))
 
     # Timeline
-    elements.append(Paragraph("ҮЙЛЧИЛГЭЭНИЙ ТҮҮХ (СҮҮЛИЙН 15)", style_h))
+    elements.append(Paragraph("Ò®Ð™Ð›Ð§Ð˜Ð›Ð“Ð­Ð­ÐÐ˜Ð™ Ð¢Ò®Ò®Ð¥ (Ð¡Ò®Ò®Ð›Ð˜Ð™Ð 15)", style_h))
     timeline = build_device_timeline(device, limit=15)
     if not timeline:
-        elements.append(Paragraph("Бичлэг олдсонгүй.", styles["Normal"]))
+        elements.append(Paragraph("Ð‘Ð¸Ñ‡Ð»ÑÐ³ Ð¾Ð»Ð´ÑÐ¾Ð½Ð³Ò¯Ð¹.", styles["Normal"]))
     else:
-        tr = [["Огноо", "Төрөл", "Тайлбар"]] + timeline
+        tr = [["ÐžÐ³Ð½Ð¾Ð¾", "Ð¢Ó©Ñ€Ó©Ð»", "Ð¢Ð°Ð¹Ð»Ð±Ð°Ñ€"]] + timeline
         tt = Table(tr, colWidths=[3 * cm, 4 * cm, 9 * cm])
         tt.setStyle(
             TableStyle(
@@ -206,3 +196,4 @@ def generate_device_passport_pdf_bytes(device, request=None) -> bytes:
 
     doc.build(elements)
     return buf.getvalue()
+

@@ -1,0 +1,22 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block title %}Өгөгдөл бүртгэх | {{ site_title|default:_("Django site admin") }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+  <h1 class="mb-3">Өгөгдөл бүртгэх (Админ)</h1>
+
+  <div class="card">
+    <div class="card-body">
+      <p>Эндээс үндсэн өгөгдлүүдийг хурдан оруулах холбоосууд байрлана.</p>
+
+      <ul>
+        <li><a href="{% url 'admin:inventory_location_add' %}">Байршил нэмэх</a></li>
+        <li><a href="{% url 'admin:inventory_device_add' %}">Багаж нэмэх</a></li>
+        <li><a href="{% url 'admin:inventory_instrumentcatalog_add' %}">Багажны жагсаалт (InstrumentCatalog) нэмэх</a></li>
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,8 +1,61 @@
 {% extends "admin/base_site.html" %}
+{% load static %}
 
 {% block content %}
-<div class="container-fluid" style="padding: 16px;">
-  <h1 style="font-weight:900;">Dashboard (Хүснэгт)</h1>
-  <p style="opacity:.75;">OK — dashboard_table.html олдлоо ✅</p>
+<div style="padding:20px;">
+  <div style="display:grid; grid-template-columns: 1.2fr 1fr; gap:20px; align-items:start;">
+    <div>
+      <h1 style="margin-top:0;">Хяналтын самбар (Live Charts)</h1>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <div id="status_chart" style="height: 340px; background:#fff; padding:15px; border-radius:10px; border:1px solid #eee;"></div>
+        <div id="workflow_chart" style="height: 340px; background:#fff; padding:15px; border-radius:10px; border:1px solid #eee;"></div>
+      </div>
+    </div>
+
+    <div>
+      <h1 style="margin-top:0;">Тайлангийн хүснэгт</h1>
+
+      <div id="kpi_box" class="card" style="display:flex; gap:30px; padding:15px; background:#fff; margin-bottom:15px; border-radius:10px; border:1px solid #ddd;">
+        <div>Нийт ажил: <b id="kpi_total">0</b></div>
+        <div style="color:green;">Дууссан: <b id="kpi_done">0</b></div>
+        <div style="color:orange;">Хүлээгдэж буй: <b id="kpi_pending">0</b></div>
+        <div style="margin-left:auto; opacity:.7; font-size: 12px;" id="ajax_state">Бэлэн</div>
+      </div>
+
+      <div class="card" style="padding:15px; background:#f8f9fa; border-radius:10px; margin-bottom:15px; border:1px solid #eee;">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px;">
+          <select id="id_report" style="padding: 5px; border-radius: 4px;">
+            <option value="maintenance">Засвар үйлчилгээ</option>
+            <option value="control">Хяналт тохируулга</option>
+          </select>
+          <input type="text" id="id_performer" placeholder="Гүйцэтгэгч (нэр/байгууллага) хайх..." style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px;">
+          <input type="date" id="id_date_from" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+          <input type="date" id="id_date_to" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+          <button id="btn_filter" class="button default" type="button" style="cursor: pointer;">Шүүх</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px; background:#fff; border-radius:10px; overflow:auto; border:1px solid #ddd; max-height: 500px;">
+    <table style="width:100%; border-collapse:collapse;">
+      <thead style="background:#f1f3f5; position: sticky; top: 0;">
+        <tr id="table_head"></tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <pre id="debugBox" style="display:none; white-space:pre-wrap; background:#111; color:#eee; padding:10px; border-radius:8px; margin-top:10px;"></pre>
 </div>
+
+<!-- ECharts (local) -->
+<script src="{% static 'inventory/vendor/echarts/echarts.min.js' %}"></script>
+
+<!-- Table + Charts JS (each only once) -->
+<script src="{% static 'inventory/js/dashboard_table.js' %}"></script>
+<script src="{% static 'inventory/js/dashboard_charts.js' %}"></script>
 {% endblock %}

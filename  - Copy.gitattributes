@@ -34,12 +34,3 @@
 *.tar binary
 *.woff binary
 *.woff2 binary
-
-# Normalize line endings (LF in repo)
-* text=auto eol=lf
-
-# Windows scripts keep CRLF (сонголттой)
-*.bat text eol=crlf
-*.cmd text eol=crlf
-*.ps1 text eol=crlf
-

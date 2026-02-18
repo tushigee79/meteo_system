@@ -1,0 +1,159 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}График тайлан | Meteo System{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static 'inventory/vendor/leaflet/leaflet.css' %}">
+<script src="{% static 'inventory/vendor/leaflet/leaflet.js' %}"></script>
+
+<script src="{% static 'inventory/vendor/echarts/echarts.min.js' %}"></script>
+
+<script>
+  // URL-уудыг View-ээс дамжуулах (namespace алдаанаас сэргийлнэ)
+  window.PENDING_COUNTS_URL = "{{ pending_counts_url|escapejs }}";
+  window.DASH_GRAPH_DATA_URL = "{{ dash_graph_data_url|escapejs }}";
+</script>
+
+<style>
+  :root {
+    --card-bg: #ffffff;
+    --border-color: rgba(0,0,0,.08);
+    --shadow: 0 4px 12px rgba(0,0,0,.05);
+  }
+
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: var(--shadow);
+    margin-bottom: 20px;
+  }
+
+  /* Шүүлтүүрийн хэсэг */
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    align-items: flex-end;
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    margin-top: 10px;
+  }
+
+  .filters .f {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    min-width: 180px;
+  }
+
+  .filters label {
+    font-weight: 600;
+    font-size: 13px;
+    color: #555;
+  }
+
+  /* Графикуудын эгнээ - Жижиг дэлгэц дээр автоматаар шилжинэ */
+  .dash-row { 
+    display: grid; 
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); 
+    gap: 20px; 
+    margin-bottom: 20px;
+  }
+
+  .chart-container {
+    height: 300px;
+    width: 100%;
+  }
+
+  .status {
+    padding: 8px 15px;
+    border-radius: 6px;
+    font-weight: 600;
+    text-align: center;
+    background: #e9ecef;
+  }
+
+  #map { 
+    height: 500px; 
+    border-radius: 12px; 
+    border: 1px solid var(--border-color);
+  }
+
+  .muted { font-size: 11px; color: #888; margin-top: 4px; }
+
+  /* Django Admin товчлуурын хэв маягт тохируулах */
+  .button.default {
+    height: 35px;
+    line-height: 15px;
+    background: #79aec8;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <div class="card">
+    <h1 style="margin:0 0 15px; font-size: 1.5rem;">📊 График тайлан ба Хяналт</h1>
+
+    <div class="filters">
+      <div class="f">
+        <label for="date_from">Эхлэх огноо</label>
+        <input id="date_from" type="date" class="vTextField">
+      </div>
+      <div class="f">
+        <label for="date_to">Дуусах огноо</label>
+        <input id="date_to" type="date" class="vTextField">
+      </div>
+      <div class="f">
+        <label for="aimag_id">Аймаг / Хот</label>
+        <select id="aimag_id" class="vTextField" style="height: 35px;">
+          <option value="">Бүгд</option>
+          </select>
+      </div>
+      <div class="f">
+        <label for="kind">Төхөөрөмжийн төрөл</label>
+        <input id="kind" type="text" placeholder="ж: AWS, RADAR" class="vTextField">
+        <div class="muted">💡 Станц, Радар, Автомат...</div>
+      </div>
+      <div class="f" style="min-width: 140px; flex: 0;">
+        <button id="applyBtn" class="button default" style="width: 100%;">Шүүлт хийх</button>
+      </div>
+      <div class="f" style="min-width: 120px; flex: 0;">
+        <div id="ajaxState" class="status">Бэлэн</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dash-row">
+    <div class="card">
+      <h3 style="margin-top:0;">Ажлын урсгал (Workflow)</h3>
+      <div id="chart_workflow" class="chart-container"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">SLA (Хүлээгдэж буй хугацаа)</h3>
+      <div id="chart_sla" class="chart-container"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">Аймгаар (Aimag breakdown)</h3>
+      <div id="chart_aimag" class="chart-container"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">Төрлөөр (Device Kind)</h3>
+      <div id="chart_kind" class="chart-container"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">📍 Станцуудын байршил</h3>
+    <div id="map"></div>
+  </div>
+</div>
+
+<script src="{% static 'inventory/js/dashboard_graph.js' %}"></script>
+{% endblock %}

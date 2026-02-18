@@ -8,13 +8,13 @@ from django.db.models import Count, Q, Max
 from django.core.serializers.json import DjangoJSONEncoder
 from django.urls import reverse
 from django.utils import timezone
-from django.db.models import Count, Q, Max
+from django.db.models import Count, Q, Max, F
 from django.core.serializers.json import DjangoJSONEncoder
 import json
 from inventory.models import Location, SumDuureg, Device
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
-
+from datetime import timedelta
 # ---------------------------------------------------------------------
 # 1. Admin Data Entry Redirection
 # ---------------------------------------------------------------------
@@ -344,50 +344,65 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     """
     Dashboard-ийн статистик болон графикуудыг харуулах view.
     """
-    # KPI Тоонууд
+    # --- 1. Хугацааны helper-үүд тодорхойлох ---
+    # verification_status талбарын оронд огноогоор тооцоолол хийнэ
+    today = timezone.localdate()
+    d30 = today + timedelta(days=30)
+    d90 = today + timedelta(days=90)
+
+    # Шүүлтүүрийн нөхцөлүүд (Q Objects)
+    expired_q = Q(next_verification_date__lt=today)
+    due_30_q = Q(next_verification_date__gte=today, next_verification_date__lte=d30)
+    due_90_q = Q(next_verification_date__gt=d30, next_verification_date__lte=d90)
+    unknown_q = Q(next_verification_date__isnull=True)
+    valid_q = Q(next_verification_date__gt=d90)
+
+    # --- 2. KPI Тоо баримтууд ---
     total_devices = Device.objects.count()
     active_devices = Device.objects.filter(status='Active').count()
     broken_devices = Device.objects.filter(status__in=['Broken', 'Repair']).count()
-    expired_count = Device.objects.filter(verification_status='expired').count()
+    
+    # Калибровкын нарийвчилсан тоонууд (Огноогоор шүүх)
+    calib_expired = Device.objects.filter(expired_q).count()
+    calib_due_30 = Device.objects.filter(due_30_q).count()
+    calib_due_90 = Device.objects.filter(due_90_q).count()
+    calib_unknown = Device.objects.filter(unknown_q).count()
+    calib_valid = Device.objects.filter(valid_q).count()
 
-    # Калибровкын нарийвчилсан тоонууд (Cards)
-    calib_expired = Device.objects.filter(verification_status='expired').count()
-    calib_due_30 = Device.objects.filter(verification_status='due_30').count()
-    calib_due_90 = Device.objects.filter(verification_status='due_90').count()
-    calib_unknown = Device.objects.filter(verification_status='unknown').count()
-
-    # 1. Төлөвийн статистик (Doughnut Chart)
+    # --- 3. График өгөгдөл бэлтгэх ---
+    # А. Төлөвийн статистик (Doughnut Chart)
     status_stats = list(Device.objects.values('status').annotate(count=Count('id')))
     
-    # 2. Аймгуудын эвдрэлийн статистик (Top 10 Bar Chart)
+    # Б. Аймгуудын эвдрэлийн статистик (Засарсан талбарын нэр: aimag_name)
     aimag_stats = list(
         Location.objects.filter(devices__status__in=['Broken', 'Repair'])
-        .values(name=F('aimag_ref__name'))
+        .values(aimag_name=F('aimag_ref__name'))
         .annotate(broken_count=Count('devices'))
         .order_by('-broken_count')[:10]
     )
 
-    # 3. Калибровкын төлөвийн статистик (Шинэ Doughnut Chart - Баруун талын)
-    # Энд 'valid' төлөвийг 'due_90' болон бусад хэвийн төлөвүүдийн нийлбэр гэж үзэв
-    calib_valid = Device.objects.filter(verification_status__in=['due_90', 'valid']).count()
-    
+    # В. Калибровкын график өгөгдөл (Шинэчилсэн ангиллаар)
     calib_chart_data = [
         {'status': 'Expired', 'count': calib_expired},
         {'status': 'Due30', 'count': calib_due_30},
+        {'status': 'Due90', 'count': calib_due_90},
         {'status': 'Valid', 'count': calib_valid},
+        {'status': 'Unknown', 'count': calib_unknown},
     ]
 
+    # --- 4. Context бэлтгэж render хийх ---
     context = {
         'title': 'Багаж хэрэгслийн хяналтын самбар',
         'total_devices': total_devices,
         'active_devices': active_devices,
         'broken_devices': broken_devices,
-        'expired_count': expired_count,
         
+        # Калибровкын тоонууд
         'calib_expired': calib_expired,
         'calib_due_30': calib_due_30,
         'calib_due_90': calib_due_90,
         'calib_unknown': calib_unknown,
+        'calib_valid': calib_valid,
 
         # JSON өгөгдлүүд (Charts)
         'status_stats_json': json.dumps(status_stats, cls=DjangoJSONEncoder),
@@ -395,7 +410,9 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         'calib_stats_json': json.dumps(calib_chart_data, cls=DjangoJSONEncoder),
     }
 
-    return render(request, "inventory/dashboard.html", context)
+    # Зөв template руу чиглүүлэв
+    return render(request, "admin/dashboard_general.html", context)
+
 
     html = f"""<!doctype html>
 <html lang="mn">

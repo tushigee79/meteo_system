@@ -2,29 +2,25 @@
 from django.conf import settings
 from django.conf.urls.static import static
 from django.shortcuts import redirect
-from django.urls import path, include
-from django.urls import path
+from django.urls import path, reverse
+
+from inventory.admin_site import inventory_admin_site  # ✅ ганц эх үүсвэр
 from inventory.views_qr import qr_public, qr_passport_pdf
 
-# inventory/admin.py дотор нэгтгэсэн inventory_admin_site-ийг импортлох
-from inventory.admin import inventory_admin_site
+
+def root_redirect(request):
+    # custom AdminSite.name = "inventory_admin" тул index нь inventory_admin:index
+    return redirect(reverse("inventory_admin:index"))
+
 
 urlpatterns = [
-    # 1) APP routes (namespace = inventory)
-    path("", include(("inventory.urls", "inventory"), namespace="inventory")),
-
-    # 2) Admin site
+    path("", root_redirect),
     path("django-admin/", inventory_admin_site.urls),
 
-    # 3) Redirect shortcuts
-    path("admin/login/",  lambda request: redirect("/django-admin/login/", permanent=False)),
-    path("admin/logout/", lambda request: redirect("/django-admin/logout/", permanent=False)),
-    path("admin/",        lambda request: redirect("/django-admin/", permanent=False)),
-     path("qr/public/<uuid:token>/", qr_public, name="qr_device_public"),
-    path("qr/public/<uuid:token>/passport.pdf", qr_passport_pdf, name="qr_device_public_passport_pdf"),
+    # Public QR endpoints
+    path("qr/<uuid:token>/", qr_public, name="qr_public"),
+    path("qr/<uuid:token>/passport.pdf", qr_passport_pdf, name="qr_passport_pdf"),
 ]
 
 if settings.DEBUG:
-    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
-    if getattr(settings, "MEDIA_URL", None) and getattr(settings, "MEDIA_ROOT", None):
-        urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

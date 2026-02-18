@@ -3,9 +3,13 @@
 
 {% block extrastyle %}
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+<script>
+  /* 1. URL-уудыг Namespace-тэй нь зөв тохируулах */
+  window.WF_REVIEW_URL = "{% url 'inventory_admin:workflow_review' %}";
+  window.WF_DATA_URL   = "{% url 'inventory_admin:workflow_pending' %}?ajax=1";
+</script>
 <style>
   .wf-wrap { max-width: 1400px; margin: 0 auto; padding: 20px; }
-  /* Metric Cards */
   .wf-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px; }
   .wf-card { background: #fff; border-radius: 10px; padding: 20px; border-left: 4px solid #4e73df; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
   .wf-card.maint { border-left-color: #1cc88a; }
@@ -13,31 +17,25 @@
   .wf-card .label { font-size: 11px; font-weight: 800; text-transform: uppercase; color: #4e73df; margin-bottom: 5px; }
   .wf-card .value { font-size: 24px; font-weight: 700; color: #5a5c69; }
 
-  /* Filter Section */
   .filter-box { background: #fff; border-radius: 10px; border: 1px solid #e3e6f0; padding: 20px; margin-bottom: 25px; }
   .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; align-items: end; }
-  .filter-group label { display: block; font-size: 12px; font-weight: bold; margin-bottom: 5px; color: #333; }
   .filter-control { width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #d1d3e2; }
 
-  /* Table Style */
   .table-box { background: #fff; border-radius: 10px; border: 1px solid #e3e6f0; overflow: hidden; }
   .wf-table { width: 100%; border-collapse: collapse; }
   .wf-table th { background: #f8f9fc; padding: 12px; text-align: left; font-size: 12px; font-weight: 800; color: #4e73df; text-transform: uppercase; }
   .wf-table td { padding: 15px 12px; border-top: 1px solid #e3e6f0; vertical-align: middle; }
   .wf-row:hover { background: #fcfdfe; cursor: pointer; }
   
-  .empty-state { padding: 60px; text-align: center; color: #b7b9cc; }
-  .empty-state i { font-size: 48px; margin-bottom: 15px; display: block; }
-
   .badge { padding: 5px 10px; border-radius: 50px; font-size: 11px; font-weight: 700; }
   .badge-pending { background: #fff4e5; color: #b45309; }
-  .badge-need { background: #ffebee; color: #b91c1c; }
 
-  .btn-action { border: 1px solid #ddd; padding: 6px 12px; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: 700; transition: 0.2s; }
+  .btn-action { border: 1px solid #ddd; padding: 6px 12px; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: 700; transition: 0.2s; text-decoration: none; }
   .btn-approve { border-color: #1cc88a; color: #1cc88a; background: #fff; }
   .btn-approve:hover { background: #1cc88a; color: #fff; }
   .btn-reject { border-color: #e74a3b; color: #e74a3b; background: #fff; }
   .btn-reject:hover { background: #e74a3b; color: #fff; }
+  .empty-state { padding: 60px; text-align: center; color: #b7b9cc; }
 </style>
 {% endblock %}
 
@@ -51,95 +49,60 @@
   </div>
 
   <div class="wf-cards">
-    <div class="wf-card">
-        <div class="label">Нийт хүлээгдэж буй</div>
-        <div class="value" id="m_total">{{ rows|length }}</div>
-    </div>
-    <div class="wf-card maint">
-        <div class="label">Засвар (Maintenance)</div>
-        <div class="value" id="m_maint">0</div>
-    </div>
-    <div class="wf-card control">
-        <div class="label">Хяналт (Control)</div>
-        <div class="value" id="m_control">0</div>
-    </div>
+    <div class="wf-card"><div class="label">Нийт</div><div class="value" id="m_total">{{ rows|length }}</div></div>
+    <div class="wf-card maint"><div class="label">Засвар</div><div class="value" id="m_maint">0</div></div>
+    <div class="wf-card control"><div class="label">Хяналт</div><div class="value" id="m_control">0</div></div>
   </div>
 
   <div class="filter-box">
     <form id="wfForm" class="filter-grid">
       <div class="filter-group">
-        <label>Төлөв (Status)</label>
-        <select name="status" id="f_status" class="filter-control">
-          <option value="">Бүх (Pending set)</option>
-          {% for s in pending_statuses %}
-            <option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s }}</option>
-          {% endfor %}
+        <label>Төлөв</label>
+        <select name="status" class="filter-control">
+          <option value="">Бүх</option>
+          {% for s in pending_statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
         </select>
       </div>
       <div class="filter-group">
-        <label>Төрөл (Kind)</label>
-        <select name="kind" id="f_kind" class="filter-control">
-          <option value="">Бүгд (ALL)</option>
-          <option value="MAINT" {% if filters.kind == "MAINT" %}selected{% endif %}>Засвар (MAINT)</option>
-          <option value="CONTROL" {% if filters.kind == "CONTROL" %}selected{% endif %}>Хяналт (CONTROL)</option>
+        <label>Төрөл</label>
+        <select name="kind" class="filter-control">
+          <option value="">Бүгд</option>
+          <option value="MAINT">Засвар</option>
+          <option value="CONTROL">Хяналт</option>
         </select>
       </div>
       <div class="filter-group">
         <label>Аймаг</label>
-        <input name="aimag" id="f_aimag" class="filter-control" value="{{ filters.aimag }}" placeholder="Код/Нэр" {% if is_aimag_engineer %}disabled{% endif %}>
-      </div>
-      <div class="filter-group">
-        <label>Байгууллага</label>
-        <input name="org" id="f_org" class="filter-control" value="{{ filters.org }}" placeholder="Owner Org">
+        <input name="aimag" class="filter-control" placeholder="Код/Нэр" {% if is_aimag_engineer %}disabled{% endif %}>
       </div>
       <div class="filter-group" style="display:flex; gap:10px;">
-        <button type="button" id="btn_reset" class="btn-action w-100" style="background:#f8f9fc">Reset</button>
-        <a href="?" class="btn-action btn-approve w-100 text-center" style="text-decoration:none; line-height:2.4">Apply</a>
+        <button type="button" id="btn_reset" class="btn-action w-100">Reset</button>
+        <button type="submit" class="btn-action btn-approve w-100">Apply</button>
       </div>
     </form>
-    <div class="small text-muted mt-2"><i class="fas fa-bolt text-warning"></i> Шүүлтүүр өөрчлөгдөхөд өгөгдөл автоматаар (AJAX) шинэчлэгдэнэ.</div>
   </div>
 
   <div class="table-box">
     <table class="wf-table">
       <thead>
         <tr>
-          <th>Kind</th>
-          <th>Status</th>
-          <th>Created</th>
-          <th>Device</th>
-          <th>Location / Aimag</th>
-          <th style="width:180px">Actions</th>
+          <th>Kind</th><th>Status</th><th>Created</th><th>Device</th><th>Location</th><th>Actions</th>
         </tr>
       </thead>
       <tbody id="wfBody">
         {% for r in rows %}
-        <tr class="wf-row" data-record="{{ r.record_url }}">
+        <tr class="wf-row" data-record-url="{{ r.record_url }}">
           <td><strong>{{ r.kind }}</strong></td>
-          <td>
-            <span class="badge {% if r.status == 'NEED_APPROVAL' %}badge-need{% else %}badge-pending{% endif %}">
-              {{ r.status }}
-            </span>
-          </td>
+          <td><span class="badge badge-pending">{{ r.status }}</span></td>
           <td class="small text-muted">{{ r.created_at }}</td>
           <td><a href="{{ r.device_url }}" target="_blank"><b>{{ r.device_label }}</b></a></td>
-          <td>
-              <div class="small">{{ r.location_label }}</div>
-              <div class="small text-muted">{{ r.aimag }} | {{ r.org }}</div>
-          </td>
+          <td><div class="small">{{ r.aimag }} | {{ r.org }}</div></td>
           <td>
             <div class="d-flex" style="gap:5px">
-                <button type="button" class="btn-action btn-approve wf-approve" data-kind="{{ r.kind }}" data-id="{{ r.record_id }}">Approve</button>
-                <button type="button" class="btn-action btn-reject wf-reject" data-kind="{{ r.kind }}" data-id="{{ r.record_id }}">Reject</button>
-            </div>
-          </td>
-        </tr>
-        {% empty %}
-        <tr>
-          <td colspan="6">
-            <div class="empty-state">
-              <i class="fas fa-clipboard-check"></i>
-              <p>Хүлээгдэж буй ажлын урсгал олдсонгүй.</p>
+              <button type="button" class="btn-action btn-approve wf-btn-action" 
+                      data-kind="{{ r.kind }}" data-id="{{ r.record_id }}" data-action="approve">Approve</button>
+              <button type="button" class="btn-action btn-reject wf-btn-action" 
+                      data-kind="{{ r.kind }}" data-id="{{ r.record_id }}" data-action="reject">Reject</button>
             </div>
           </td>
         </tr>
@@ -149,87 +112,76 @@
   </div>
 </div>
 
-<script src="{% static 'admin/js/vendor/jquery/jquery.min.js' %}"></script>
 <script>
-(function($){
-  const ajaxUrl = window.location.pathname; 
-  const reviewUrl = "/django-admin/inventory/workflow/review/";
-
-  function updateMetrics(rows) {
-    const total = rows.length;
-    const maint = rows.filter(r => r.kind === "MAINT").length;
-    const control = rows.filter(r => r.kind === "CONTROL").length;
-    $('#m_total').text(total);
-    $('#m_maint').text(maint);
-    $('#m_control').text(control);
-  }
-
-  function bindEvents() {
-    $('.wf-row').off('click').on('click', function(e) {
-      if ($(e.target).closest('a, button').length) return;
-      const url = $(this).data('record');
-      if (url && url !== "#") window.open(url, '_blank', 'noopener');
-    });
-
-    $('.wf-approve, .wf-reject').off('click').on('click', async function(e) {
-      e.preventDefault(); e.stopPropagation();
-      const $btn = $(this);
-      const kind = $btn.data('kind');
-      const id = $btn.data('id');
-      const isReject = $btn.hasClass('wf-reject');
-      let reason = "";
-      if (isReject) {
-        reason = prompt("Reject шалтгаан оруулна уу:", "");
-        if (reason === null) return;
-        if (!reason.trim()) return alert("Шалтгаан заавал оруулна уу.");
-      }
-      $btn.closest('td').find('button').prop('disabled', true);
-      try {
-        const res = await $.ajax({
-          url: reviewUrl, method: "POST",
-          data: { kind: kind, id: id, action: isReject ? "reject" : "approve", reason: reason, csrfmiddlewaretoken: '{{ csrf_token }}' }
-        });
-        if (res.ok) {
-          $btn.closest('tr').fadeOut(300, function() {
-            $(this).remove();
-            updateMetrics($('.wf-row').map(function() { return { kind: $(this).find('td strong').text() }; }).get());
-          });
+(function() {
+  /* CSRF Token авах функц */
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
         }
-      } catch (err) {
-        alert(err.responseJSON?.error || "Алдаа гарлаа");
-        $btn.closest('td').find('button').prop('disabled', false);
       }
-    });
-  }
-
-  function renderRows(rows) {
-    const $tbody = $('#wfBody');
-    $tbody.empty();
-    if (!rows.length) {
-      $tbody.append('<tr><td colspan="6"><div class="empty-state"><i class="fas fa-clipboard-check"></i><p>Хүлээгдэж буй ажлын урсгал олдсонгүй.</p></div></td></tr>');
-      updateMetrics([]); return;
     }
-    rows.forEach(r => {
-      const badgeClass = (r.status === "NEED_APPROVAL") ? "badge-need" : "badge-pending";
-      $tbody.append(`<tr class="wf-row" data-record="${r.record_url}"><td><strong>${r.kind}</strong></td><td><span class="badge ${badgeClass}">${r.status}</span></td><td class="small text-muted">${r.created_at}</td><td><a href="${r.device_url}" target="_blank"><b>${r.device_label}</b></a></td><td><div class="small">${r.location_label}</div><div class="small text-muted">${r.aimag} | ${r.org}</div></td><td><div class="d-flex" style="gap:5px"><button type="button" class="btn-action btn-approve wf-approve" data-kind="${r.kind}" data-id="${r.record_id}">Approve</button><button type="button" class="btn-action btn-reject wf-reject" data-kind="${r.kind}" data-id="${r.record_id}">Reject</button></div></td></tr>`);
-    });
-    updateMetrics(rows); bindEvents();
+    return cookieValue;
   }
 
-  let timer;
-  function refresh() {
-    const params = $('#wfForm').serialize() + "&ajax=1";
-    $.getJSON(ajaxUrl + "?" + params, function(data) { if (data.ok) renderRows(data.rows); });
+  /* 3. POST Review (Approve/Reject) */
+  async function handleAction(btn) {
+    const kind = btn.dataset.kind;
+    const id = btn.dataset.id;
+    const action = btn.dataset.action;
+    let reason = "";
+
+    if (action === 'reject') {
+      reason = prompt("Reject хийх шалтгаанаа оруулна уу:");
+      if (reason === null) return;
+      if (!reason.trim()) return alert("Шалтгаан заавал оруулна уу!");
+    }
+
+    btn.disabled = true;
+    try {
+      const response = await fetch(window.WF_REVIEW_URL, {
+        method: "POST",
+        headers: {
+          "X-CSRFToken": getCookie("csrftoken"),
+          "X-Requested-With": "XMLHttpRequest",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({ kind, id, action, reason })
+      });
+
+      const result = await response.json();
+      if (result.ok) {
+        // Мөр устгах эсвэл Table-ийг бүтэн шинэчлэх
+        location.reload(); 
+      } else {
+        alert("Алдаа: " + (result.error || "Үйлдэл амжилтгүй"));
+      }
+    } catch (e) {
+      alert("Сервертэй холбогдоход алдаа гарлаа.");
+    } finally {
+      btn.disabled = false;
+    }
   }
 
-  $('.filter-control').on('change', function() { clearTimeout(timer); timer = setTimeout(refresh, 200); });
-  $('.filter-control').on('input', function() { if (this.tagName === 'INPUT') { clearTimeout(timer); timer = setTimeout(refresh, 500); } });
-  $('#btn_reset').on('click', function() { window.location.href = window.location.pathname; });
+  /* Event Listeners */
+  document.addEventListener('click', function(e) {
+    const actionBtn = e.target.closest('.wf-btn-action');
+    if (actionBtn) return handleAction(actionBtn);
 
-  $(document).ready(function() {
-    bindEvents();
-    updateMetrics($('.wf-row').map(function() { return { kind: $(this).find('td strong').text() }; }).get());
+    const row = e.target.closest('.wf-row');
+    if (row && !e.target.closest('a, button')) {
+      const url = row.dataset.recordUrl;
+      if (url) window.open(url, '_blank');
+    }
   });
-})(django.jQuery);
+
+  document.getElementById('btn_reset').onclick = () => window.location.href = window.location.pathname;
+})();
 </script>
 {% endblock %}

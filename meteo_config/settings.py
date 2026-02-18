@@ -1,11 +1,15 @@
-import os
+﻿import os
 from pathlib import Path
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = "django-insecure-your-secret-key"
 DEBUG = True
 ALLOWED_HOSTS = ["*"]
+DASHBOARD_USE_MOCK = True
+DASHBOARD_USE_MOCK = False
+
 
 INSTALLED_APPS = [
     "jazzmin",
@@ -120,42 +124,42 @@ JAZZMIN_SETTINGS = {
         "inventory.authauditlog": "fas fa-user-shield",
     },
 
-    # Sidebar: Inventory апп дээр нэмэлт линкүүд
+    # Sidebar: Inventory app дээр нэмэлт линкүүд
     "custom_links": {
         "inventory": [
             {
-                "name": "Dashboard (Нүүр)",
-                "url": "admin:dashboard_home",
-                "icon": "fas fa-tachometer-alt",
-                "permissions": ["inventory.view_location"],
-            },
-            {
-                "name": "Өгөгдөл бүртгэх (Админ)",
-                "url": "admin:admin_data_entry",
-                "icon": "fas fa-database",
-                "permissions": ["auth.view_user"],
-            },
-            {
-                "name": "Dashboard (Хүснэгт)",
+                "name": "Хүснэгт статистик",
                 "url": "admin:dashboard_table",
                 "icon": "fas fa-table",
                 "permissions": ["inventory.view_device"],
             },
             {
-                "name": "Dashboard (График)",
+                "name": "График статистик",
                 "url": "admin:dashboard_graph",
-                "icon": "fas fa-chart-bar",
+                "icon": "fas fa-chart-line",
                 "permissions": ["inventory.view_device"],
             },
             {
+                "name": "Ерөнхий самбар",
+                "url": "admin:dashboard_general",
+                "icon": "fas fa-tachometer-alt",
+                "permissions": ["inventory.view_device"],
+            },
+            {
+                "name": "Өгөгдөл оруулах",
+                "url": "inventory_admin:admin_data_entry",
+                "icon": "fas fa-edit",
+                "permissions": ["auth.view_user"],
+            },
+            {
                 "name": "Газрын зураг",
-                "url": "inventory_map",
+                "url": "admin:inventory_map",
                 "icon": "fas fa-map-marked-alt",
                 "permissions": ["inventory.view_location"],
             },
             {
                 "name": "Хүлээгдэж буй ажлууд",
-                "url": "admin:workflow_pending",
+                "url": "inventory_admin:workflow_pending",
                 "icon": "fas fa-tasks",
                 "permissions": [
                     "inventory.view_maintenanceservice",
@@ -167,36 +171,36 @@ JAZZMIN_SETTINGS = {
                 "url": "admin:workflow_audit",
                 "icon": "fas fa-clipboard-list",
                 "permissions": ["inventory.view_authauditlog"],
-            },
-            {
-                "name": "📊 Тайлан (Reports)",
-                "url": "admin:reports_hub",
-                "icon": "fas fa-chart-pie",
-                "permissions": ["inventory.view_device"],
-            },
-            {
-                "name": "📌 Ерөнхий мэдээлэл",
-                "url": "admin:dashboard_general",
-                "icon": "fas fa-info-circle",
-                "permissions": ["inventory.view_device"],
+                
             },
         ],
     },
 
-    # Top menu: давхардалгүй, зөвхөн “гол” линкүүд
+    # 2. Top menu links
     "topmenu_links": [
         {"name": "Админ", "url": "admin:index"},
-        {"name": "Газрын зураг", "url": "inventory_map", "permissions": ["inventory.view_location"]},
-        {"name": "Dashboard", "url": "admin:dashboard_table", "permissions": ["inventory.view_device"]},
-        {"name": "График тайлан", "url": "admin:dashboard_graph", "permissions": ["inventory.view_device"]},
-        {"name": "Өгөгдөл бүртгэх", "url": "admin:admin_data_entry", "permissions": ["auth.view_user"]},
-        {"name": "Reports", "url": "admin:reports_hub", "permissions": ["inventory.view_device"]},
+        {
+            "name": "Газрын зураг",
+            "url": "admin:inventory_map",  # admin: нэмэв
+            "permissions": ["inventory.view_location"],
+        },
+        {
+            "name": "Dashboard",
+            "url": "admin:dashboard_table",
+            "permissions": ["inventory.view_device"],
+        },
+        {
+            "name": "График тайлан",
+            "url": "admin:dashboard_graph",
+            "permissions": ["inventory.view_device"],
+        },
+        {
+            "name": "Өгөгдөл бүртгэх",
+            "url": "admin:admin_data_entry",
+            "permissions": ["auth.view_user"],
+        },
     ],
 }
-
-# ✅ Clickjacking / Leaflet admin map iframe зөвшөөрөх
-X_FRAME_OPTIONS = "SAMEORIGIN"
-
 
 # ==================================================
 # Verification expiry config (admin + dashboard)

@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from io import BytesIO
 from typing import Optional
 
+
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.cache import cache
@@ -33,9 +34,9 @@ class InstrumentCatalog(models.Model):
         OTHER = "OTHER", "Бусад"
 
     code = models.CharField(max_length=50, unique=True, verbose_name="Код")
-    name_mn = models.CharField(max_length=255, verbose_name="р (MN)")
-    kind = models.CharField(max_length=16, choices=Kind.choices, default=Kind.OTHER, db_index=True)
-    unit = models.CharField(max_length=50, blank=True, default="", verbose_name="гж")
+    name_mn = models.CharField(max_length=255, verbose_name="Нэр (MN)")
+    kind = models.CharField(max_length=16, choices=Kind.choices, default=Kind.OTHER, db_index=True, verbose_name="Төрөл",)
+    unit = models.CharField(max_length=50, blank=True, default="", verbose_name="Нэгж")
     is_active = models.BooleanField(default=True, verbose_name="Идэвхтэй")
 
     # verification cycle (optional)
@@ -600,10 +601,37 @@ class ControlEvidence(models.Model):
 # ============================================================
 # 9) Spare Parts
 # ============================================================
+
+class SparePartOrderStatus(models.TextChoices):
+    DRAFT = "draft", "Ноорог"
+    SUBMITTED = "submitted", "Илгээсэн"
+    APPROVED = "approved", "Баталсан"
+    REJECTED = "rejected", "Татгалзсан"
+
+
 class SparePartOrder(models.Model):
-    order_no = models.CharField(max_length=50, unique=True)
-    aimag = models.ForeignKey(Aimag, on_delete=models.SET_NULL, null=True, blank=True)
-    status = models.CharField(max_length=30, blank=True, default="")
+    order_no = models.CharField(
+        max_length=50,
+        unique=True,
+        verbose_name="Захиалгын дугаар",
+    )
+
+    aimag = models.ForeignKey(
+    "Aimag",
+    on_delete=models.PROTECT,
+    verbose_name="Аймаг",
+    null=True,
+    blank=True,
+    )
+
+    
+    status = models.CharField(
+        max_length=16,
+        choices=SparePartOrderStatus.choices,
+        default=SparePartOrderStatus.DRAFT,
+        verbose_name="Төлөв",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -612,6 +640,7 @@ class SparePartOrder(models.Model):
     class Meta:
         verbose_name = "Сэлбэгийн захиалга"
         verbose_name_plural = "Сэлбэгийн захиалга"
+
 
 
 class SparePartItem(models.Model):

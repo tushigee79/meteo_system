@@ -39,9 +39,7 @@
       <input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}">
       <button class="btn" type="submit">Шүүх</button>
 
-      {% url 'admin:dashboard-export-devices-csv' as csv_url %}
-{% url 'admin:dashboard-export-devices-xlsx' as xlsx_url %}
-
+      
 {% if csv_url %}
   <a class="btn" href="{{ csv_url }}?{{ request.GET.urlencode }}">CSV</a>
 {% endif %}
@@ -173,6 +171,9 @@
           ${p.loc_admin_url ? `<a class="btn" href="${p.loc_admin_url}">Location</a>` : ""}
           ${p.device_list_url ? `<a class="btn" href="${p.device_list_url}">Devices</a>` : ""}
         </div>
+        <link rel="stylesheet" href="{% static 'inventory/vendor/leaflet/leaflet.css' %}">
+        <script src="{% static 'inventory/vendor/leaflet/leaflet.js' %}"></script>
+
       </div>
     `;
     m.bindPopup(html);

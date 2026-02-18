@@ -1,390 +1,129 @@
-# inventory/reports_hub_compat.py
-# inventory/views_admin_workflow.py
-from __future__ import annotations
+import logging
+from typing import Any, Optional, List
+from dataclasses import dataclass
+from datetime import datetime
 
-from typing import Any, Optional
-from dataclasses import dataclass, field
 from django.contrib.admin.views.decorators import staff_member_required
-from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
-from dataclasses import dataclass, field
-from django.views.decorators.http import require_GET
+from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.db.models import Q
+from django.utils import timezone
+from django.shortcuts import render, get_object_or_404
+from django.urls import reverse
 
+from .models import Device, Location, MaintenanceService, ControlAdjustment, AuthAuditLog
 
-
-from .admin_compat import admin_url as _admin_url
-from .admin_compat import get_user_aimag as _get_user_aimag
-from .admin_compat import has_field as _has_field
-
-
-
-
-# ============================================================
-# Pending workflow row
-# ============================================================
+# 1. Мэдээллийн бүтэц (Алдаанаас сэргийлнэ)
 @dataclass
 class WorkflowRow:
-    kind: str                 # "MAINT" | "CONTROL"
-    status: str               # workflow_status
-    created_at: Any           # datetime/date
+    kind: str
+    status: str
+    created_at: Any
     device_label: str
     device_id: Optional[int]
     device_url: str
-    record_id: int            # MaintenanceService.id / ControlAdjustment.id
+    record_id: int
     record_url: str
     location_label: str
     location_url: str
     aimag: str
     org: str
 
+# 2. Туслах функцүүд
+def _admin_url(app_label: str, model_name: str, pk: Any) -> str:
+    try:
+        return reverse(f"admin:{app_label}_{model_name}_change", args=[pk])
+    except:
+        return "#"
 
-# ============================================================
-# Pending dashboard page (HTML + AJAX JSON)
-# ============================================================
+def _get_user_aimag(user) -> Optional[object]:
+    if not user or user.is_anonymous: return None
+    prof = getattr(user, "userprofile", None) or getattr(user, "profile", None)
+    return getattr(prof, "aimag", None) if prof else None
+
+# 3. Үндсэн Dashboard View
 @staff_member_required
 def workflow_pending_dashboard(request: HttpRequest) -> HttpResponse:
     status = (request.GET.get("status") or "").strip().upper()
     kind = (request.GET.get("kind") or "").strip().upper()
-    aimag = (request.GET.get("aimag") or "").strip()
-    org = (request.GET.get("org") or "").strip()
-    days = (request.GET.get("days") or "").strip()
+    
+    PENDING_SET = ["SUBMITTED", "PENDING", "NEED_APPROVAL"]
+    base_statuses = [status] if status else PENDING_SET
 
-    PENDING_SET = ["PENDING", "NEED_APPROVAL"]
-    base_statuses = PENDING_SET if not status else [status]
-
-    user_aimag = _get_user_aimag(request)
-    is_aimag_engineer = request.user.groups.filter(name="AimagEngineer").exists()
-
-    ms_qs = (
-        MaintenanceService.objects.select_related(
-            "device",
-            "device__location",
-            "device__location__aimag_ref",
-            "device__location__owner_org",
-        )
-        .filter(workflow_status__in=base_statuses)
-    )
-
-    ca_qs = (
-        ControlAdjustment.objects.select_related(
-            "device",
-            "device__location",
-            "device__location__aimag_ref",
-            "device__location__owner_org",
-        )
-        .filter(workflow_status__in=base_statuses)
-    )
-
-    # Days filter
-    if days.isdigit():
-        dt = timezone.now() - timezone.timedelta(days=int(days))
-        if _has_field(MaintenanceService, "created_at"):
-            ms_qs = ms_qs.filter(created_at__gte=dt)
-        else:
-            ms_qs = ms_qs.filter(date__gte=dt.date())
-
-        if _has_field(ControlAdjustment, "created_at"):
-            ca_qs = ca_qs.filter(created_at__gte=dt)
-        else:
-            ca_qs = ca_qs.filter(date__gte=dt.date())
-
-    # Aimag scope
-    if is_aimag_engineer and user_aimag:
-        ms_qs = ms_qs.filter(device__location__aimag_ref=user_aimag)
-        ca_qs = ca_qs.filter(device__location__aimag_ref=user_aimag)
-    elif aimag:
-        aimag_q = (
-            Q(device__location__aimag_ref__code__iexact=aimag)
-            | Q(device__location__aimag_ref__name__iexact=aimag)
-            | Q(device__location__aimag_ref__name__icontains=aimag)
-        )
-        ms_qs = ms_qs.filter(aimag_q)
-        ca_qs = ca_qs.filter(aimag_q)
-
-    # Org filter
-    if org:
-        org_q = (
-            Q(device__location__owner_org__name__icontains=org)
-            | Q(device__location__org__name__icontains=org)
-        )
-        ms_qs = ms_qs.filter(org_q)
-        ca_qs = ca_qs.filter(org_q)
-
-    ms_order = "-created_at" if _has_field(MaintenanceService, "created_at") else "-date"
-    ca_order = "-created_at" if _has_field(ControlAdjustment, "created_at") else "-date"
+    # Өгөгдөл авах
+    ms_qs = MaintenanceService.objects.select_related("device", "device__location__aimag_ref").filter(workflow_status__in=base_statuses)
+    ca_qs = ControlAdjustment.objects.select_related("device", "device__location__aimag_ref").filter(workflow_status__in=base_statuses)
 
     rows: List[WorkflowRow] = []
 
+    # Maintenance rows
     if kind in ("", "MAINT"):
-        for r in ms_qs.order_by(ms_order, "-id")[:1500]:
-            d = getattr(r, "device", None)
-            loc = getattr(d, "location", None)
-            created = getattr(r, "created_at", None) or getattr(r, "date", None)
+        for r in ms_qs.order_by("-id")[:500]:
+            d = r.device
+            loc = d.location if d else None
+            rows.append(WorkflowRow(
+                kind="MAINT", status=str(r.workflow_status).upper(), 
+                created_at=getattr(r, "created_at", None) or getattr(r, "date", None),
+                device_label=str(d), device_id=d.id if d else None,
+                device_url=_admin_url("inventory", "device", d.id) if d else "#",
+                record_id=r.id, record_url=_admin_url("inventory", "maintenanceservice", r.id),
+                location_label=str(loc) if loc else "", location_url=_admin_url("inventory", "location", loc.id) if loc else "#",
+                aimag=str(getattr(loc, "aimag_ref", "-")), org=str(getattr(loc, "owner_org", "-"))
+            ))
 
-            rows.append(
-                WorkflowRow(
-                    kind="MAINT",
-                    status=str(r.workflow_status).upper(),
-                    created_at=created,
-                    device_label=str(d) if d else "",
-                    device_id=getattr(d, "id", None),
-                    device_url=_admin_url("inventory", "device", d.id) if d else "#",
-                    record_id=int(r.id),
-                    record_url=_admin_url("inventory", "maintenanceservice", r.id),
-                    location_label=str(loc) if loc else "",
-                    location_url=_admin_url("inventory", "location", loc.id) if loc else "#",
-                    aimag=str(getattr(loc, "aimag_ref", "-")),
-                    org=str(getattr(loc, "owner_org", "-")),
-                )
-            )
-
+    # Control rows
     if kind in ("", "CONTROL"):
-        for r in ca_qs.order_by(ca_order, "-id")[:1500]:
-            d = getattr(r, "device", None)
-            loc = getattr(d, "location", None)
-            created = getattr(r, "created_at", None) or getattr(r, "date", None)
+        for r in ca_qs.order_by("-id")[:500]:
+            d = r.device
+            loc = d.location if d else None
+            rows.append(WorkflowRow(
+                kind="CONTROL", status=str(r.workflow_status).upper(), 
+                created_at=getattr(r, "created_at", None) or getattr(r, "date", None),
+                device_label=str(d), device_id=d.id if d else None,
+                device_url=_admin_url("inventory", "device", d.id) if d else "#",
+                record_id=r.id, record_url=_admin_url("inventory", "controladjustment", r.id),
+                location_label=str(loc) if loc else "", location_url=_admin_url("inventory", "location", loc.id) if loc else "#",
+                aimag=str(getattr(loc, "aimag_ref", "-")), org=str(getattr(loc, "-"))
+            ))
 
-            rows.append(
-                WorkflowRow(
-                    kind="CONTROL",
-                    status=str(r.workflow_status).upper(),
-                    created_at=created,
-                    device_label=str(d) if d else "",
-                    device_id=getattr(d, "id", None),
-                    device_url=_admin_url("inventory", "device", d.id) if d else "#",
-                    record_id=int(r.id),
-                    record_url=_admin_url("inventory", "controladjustment", r.id),
-                    location_label=str(loc) if loc else "",
-                    location_url=_admin_url("inventory", "location", loc.id) if loc else "#",
-                    aimag=str(getattr(loc, "aimag_ref", "-")),
-                    org=str(getattr(loc, "owner_org", "-")),
-                )
-            )
-
-    tz = timezone.get_current_timezone()
-    min_dt = timezone.datetime.min.replace(tzinfo=tz)
-    rows.sort(key=lambda x: (x.created_at or min_dt), reverse=True)
-
-    # AJAX JSON (template чинь "&ajax=1" явуулдаг)
+    # AJAX Response
     if request.headers.get("x-requested-with") == "XMLHttpRequest" or request.GET.get("ajax") == "1":
-        return JsonResponse(
-            {
-                "ok": True,
-                "rows": [
-                    {
-                        "kind": r.kind,
-                        "status": r.status,
-                        "created_at": r.created_at.strftime("%Y-%m-%d %H:%M") if hasattr(r.created_at, "strftime") else (str(r.created_at) if r.created_at else ""),
-                        "device_label": r.device_label,
-                        "device_url": r.device_url,
-                        "record_id": r.record_id,
-                        "record_url": r.record_url,
-                        "location_label": r.location_label,
-                        "location_url": r.location_url,
-                        "aimag": r.aimag,
-                        "org": r.org,
-                    }
-                    for r in rows[:2000]
-                ],
-            }
-        )
+        data = [{
+            "kind": r.kind, "status": r.status, "device_label": r.device_label,
+            "record_url": r.record_url, "aimag": r.aimag
+        } for r in rows]
+        return JsonResponse({"ok": True, "rows": data})
 
-    ctx = {
+    # ✅ ЗААВАЛ RETURN ХИЙХ ХЭСЭГ (HTML)
+    context = {
         "title": "Хүлээгдэж буй ажлууд",
-        "rows": rows[:2000],
-        "filters": {"status": status, "kind": kind, "aimag": aimag, "org": org, "days": days},
+        "rows": rows,
         "pending_statuses": PENDING_SET,
-        "is_aimag_engineer": is_aimag_engineer,
+        "filters": {"status": status, "kind": kind}
     }
-    return render(request, "admin/inventory/workflow_pending.html", ctx)
+    return render(request, "inventory/admin/workflow_pending.html", context)
 
-
-# ============================================================
-# Pending counts (legacy polling)
-# ============================================================
-@staff_member_required
-def workflow_pending_counts(request: HttpRequest) -> JsonResponse:
-    PENDING_SET = ["PENDING", "NEED_APPROVAL"]
-
-    user_aimag = _get_user_aimag(request)
-    is_aimag_engineer = request.user.groups.filter(name="AimagEngineer").exists()
-
-    ms_qs = MaintenanceService.objects.filter(workflow_status__in=PENDING_SET)
-    ca_qs = ControlAdjustment.objects.filter(workflow_status__in=PENDING_SET)
-
-    if is_aimag_engineer and user_aimag:
-        ms_qs = ms_qs.filter(device__location__aimag_ref=user_aimag)
-        ca_qs = ca_qs.filter(device__location__aimag_ref=user_aimag)
-
-    return JsonResponse(
-        {
-            "ok": True,
-            "pending_maint": ms_qs.count(),
-            "pending_control": ca_qs.count(),
-            "pending_total": ms_qs.count() + ca_qs.count(),
-        }
-    )
-
-
-# ============================================================
-# Review action (approve/reject)
-# ============================================================
+# 4. Review & Audit Views
 @staff_member_required
 @require_POST
 def workflow_review_action(request: HttpRequest) -> JsonResponse:
-    kind = (request.POST.get("kind") or "").upper().strip()
-    rid = (request.POST.get("id") or "").strip()
-    action = (request.POST.get("action") or "").lower().strip()
-    reason = (request.POST.get("reason") or "").strip()
-
-    if kind not in ("MAINT", "CONTROL") or not rid.isdigit() or action not in ("approve", "reject"):
-        return JsonResponse({"ok": False, "error": "Invalid params"}, status=400)
-
-    if not (request.user.is_superuser or request.user.groups.filter(name="WorkflowReviewer").exists()):
-        return JsonResponse({"ok": False, "error": "No permission"}, status=403)
-
+    kind = request.POST.get("kind", "").upper()
+    rid = request.POST.get("id")
+    action = request.POST.get("action", "").lower()
+    
     Model = MaintenanceService if kind == "MAINT" else ControlAdjustment
-    obj = get_object_or_404(Model, pk=int(rid))
-
-    if action == "approve":
-        obj.workflow_status = "APPROVED"
-    else:
-        if not reason:
-            return JsonResponse({"ok": False, "error": "Reason required"}, status=400)
-        obj.workflow_status = "REJECTED"
-        if hasattr(obj, "reject_reason"):
-            obj.reject_reason = reason
-
+    obj = get_object_or_404(Model, pk=rid)
+    obj.workflow_status = "APPROVED" if action == "approve" else "REJECTED"
     obj.save()
-    return JsonResponse({"ok": True, "kind": kind, "id": obj.id, "status": str(obj.workflow_status)})
+    return JsonResponse({"ok": True})
 
-
-# ============================================================
-# Audit page (simple: list MAINT/CONTROL history)
-# NOTE: Таны upload хийсэн workflow_audit.html нь logs гэж хүлээж байна.
-# Энэ view одоохондоо rows өгнө (pending-аас өөр зориулалттай).
-# ============================================================
 @staff_member_required
-@require_GET
 def workflow_audit_log(request: HttpRequest) -> HttpResponse:
-    q = (request.GET.get("q") or "").strip()
-    days = (request.GET.get("days") or "").strip()
-    kind = (request.GET.get("kind") or "").upper()
-    status = (request.GET.get("status") or "").upper()
+    logs = AuthAuditLog.objects.all().order_by("-created_at")[:100]
+    return render(request, "inventory/admin/workflow_audit.html", {"logs": logs})
 
-    dt_from = timezone.now() - timezone.timedelta(days=int(days)) if days.isdigit() else None
-
-    ms_qs = MaintenanceService.objects.select_related("device", "device__location")
-    ca_qs = ControlAdjustment.objects.select_related("device", "device__location")
-
-    is_aimag_engineer = request.user.groups.filter(name="AimagEngineer").exists()
-    if is_aimag_engineer:
-        user_aimag = _get_user_aimag(request)
-        if user_aimag:
-            ms_qs = ms_qs.filter(device__location__aimag_ref=user_aimag)
-            ca_qs = ca_qs.filter(device__location__aimag_ref=user_aimag)
-
-    if dt_from:
-        if _has_field(MaintenanceService, "created_at"):
-            ms_qs = ms_qs.filter(created_at__gte=dt_from)
-        else:
-            ms_qs = ms_qs.filter(date__gte=dt_from)
-        if _has_field(ControlAdjustment, "created_at"):
-            ca_qs = ca_qs.filter(created_at__gte=dt_from)
-        else:
-            ca_qs = ca_qs.filter(date__gte=dt_from)
-
-    if status:
-        ms_qs = ms_qs.filter(workflow_status__iexact=status)
-        ca_qs = ca_qs.filter(workflow_status__iexact=status)
-
-    if q:
-        ms_qs = ms_qs.filter(Q(note__icontains=q))
-        ca_qs = ca_qs.filter(Q(note__icontains=q))
-
-    ms_order = "-created_at" if _has_field(MaintenanceService, "created_at") else "-date"
-    ca_order = "-created_at" if _has_field(ControlAdjustment, "created_at") else "-date"
-
-    rows: List[dict] = []
-
-    if kind in ("", "MAINT"):
-        for o in ms_qs.order_by(ms_order, "-id")[:1500]:
-            when = getattr(o, "created_at", None) or getattr(o, "date", None)
-            rows.append(
-                {
-                    "kind": "MAINT",
-                    "when": when.strftime("%Y-%m-%d %H:%M") if hasattr(when, "strftime") else (str(when) if when else ""),
-                    "status": str(o.workflow_status).upper(),
-                    "device": str(o.device),
-                    "record_url": _admin_url("inventory", "maintenanceservice", o.id),
-                }
-            )
-
-    if kind in ("", "CONTROL"):
-        for o in ca_qs.order_by(ca_order, "-id")[:1500]:
-            when = getattr(o, "created_at", None) or getattr(o, "date", None)
-            rows.append(
-                {
-                    "kind": "CONTROL",
-                    "when": when.strftime("%Y-%m-%d %H:%M") if hasattr(when, "strftime") else (str(when) if when else ""),
-                    "status": str(o.workflow_status).upper(),
-                    "device": str(o.device),
-                    "record_url": _admin_url("inventory", "controladjustment", o.id),
-                }
-            )
-
-    # sort
-    rows.sort(key=lambda r: r.get("when") or "", reverse=True)
-
-    return render(
-        request,
-        "admin/inventory/workflow_audit.html",
-        {
-            "title": "Workflow Audit",
-            "rows": rows[:3000],
-            "filters": {"q": q, "days": days, "kind": kind, "status": status},
-        },
-    )
-
-
-# ------------------------------------------------------------
-# Aliases for admin.py compatibility
-# admin.py дээр wf.workflow_pending / wf.workflow_audit гэж дуудахад унахгүй болгоно
-# ------------------------------------------------------------
-workflow_pending = workflow_pending_dashboard
-workflow_audit = workflow_audit_log
-
-def _has_field(model: Any, field_name: str) -> bool:
-    try:
-        model._meta.get_field(field_name)
-        return True
-    except Exception:
-        return False
-
-
-def _get_user_aimag(user) -> Optional[object]:
-    """
-    Return user's aimag object if available (via UserProfile.aimag or user.profile.aimag).
-    Safe for different project layouts.
-    """
-    if not user or getattr(user, "is_anonymous", False):
-        return None
-
-    # common patterns: user.userprofile, user.profile
-    for attr in ("userprofile", "profile"):
-        prof = getattr(user, attr, None)
-        if prof is not None:
-            aimag = getattr(prof, "aimag", None)
-            if aimag is not None:
-                return aimag
-    return None
-
-
-def _admin_url(obj) -> str:
-    """
-    Admin change URL for a model instance.
-    """
-    if obj is None:
-        return ""
-    opts = obj._meta
-    return reverse(f"admin:{opts.app_label}_{opts.model_name}_change", args=[obj.pk])
+@staff_member_required
+def workflow_pending_counts(request: HttpRequest) -> JsonResponse:
+    m = MaintenanceService.objects.filter(workflow_status__in=["PENDING", "NEED_APPROVAL"]).count()
+    c = ControlAdjustment.objects.filter(workflow_status__in=["PENDING", "NEED_APPROVAL"]).count()
+    return JsonResponse({"pending_total": m + c, "ok": True})

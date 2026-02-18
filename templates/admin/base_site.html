@@ -1,50 +1,39 @@
 <!-- ✅ BASE_SITE_OVERRIDE_LOADED -->
-<script>console.log("✅ BASE_SITE OVERRIDE LOADED");</script>
-
 {% extends "admin/base.html" %}
 {% load static %}
 
 {% block extrahead %}
 {{ block.super }}
-<script>
-(function(){
 
+<script>
+(function () {
   const countsUrl = "/django-admin/inventory/workflow/pending-counts/";
   const pendingUrl = "/django-admin/inventory/workflow/pending/";
 
-  function findSidebar(){
+  function findSidebar() {
     return document.querySelector(".sidebar, #nav-sidebar, aside");
   }
 
-  function createMenuItem(){
-    const sidebar = findSidebar();
-    if(!sidebar) return null;
+  // ✅ Find the EXISTING menu link (added by Jazzmin custom_links), do NOT create new one
+  function findExistingPendingLink(sidebar) {
+    if (!sidebar) return null;
+    // Look for an <a> that points to pendingUrl (works regardless of its label text)
+    return sidebar.querySelector('a[href="' + pendingUrl + '"]');
+  }
 
-    if(sidebar.querySelector('[data-pending-workflow="1"]')) {
-      return sidebar.querySelector('[data-pending-workflow="1"]');
-    }
+  function ensureBadge(a) {
+    if (!a) return null;
 
-    const li = document.createElement("li");
-    li.setAttribute("data-pending-workflow", "1");
-    li.style.listStyle = "none";
+    // Avoid duplicates
+    let badge = a.querySelector(".pending-badge");
+    if (badge) return badge;
 
-    const a = document.createElement("a");
-    a.href = pendingUrl;
+    // Make the link layout capable of showing a badge
     a.style.display = "flex";
     a.style.alignItems = "center";
     a.style.justifyContent = "space-between";
-    a.style.padding = "8px 12px";
-    a.style.margin = "4px 8px";
-    a.style.borderRadius = "8px";
-    a.style.textDecoration = "none";
-    a.style.fontWeight = "600";
-    a.style.background = "rgba(255,255,255,0.08)";
-    a.style.color = "#fff";
 
-    const label = document.createElement("span");
-    label.innerHTML = "⏳ Pending Workflow";
-
-    const badge = document.createElement("span");
+    badge = document.createElement("span");
     badge.className = "pending-badge";
     badge.style.display = "none";
     badge.style.minWidth = "18px";
@@ -56,38 +45,39 @@
     badge.style.background = "#ef4444";
     badge.style.color = "#fff";
     badge.style.textAlign = "center";
+    badge.style.marginLeft = "8px";
 
-    a.appendChild(label);
     a.appendChild(badge);
-    li.appendChild(a);
-
-    sidebar.appendChild(li);
-    return li;
+    return badge;
   }
 
-  async function updateBadge(){
-    try{
-      const res = await fetch(countsUrl, {credentials:"same-origin"});
-      if(!res.ok) return;
+  async function updateBadge() {
+    try {
+      const sidebar = findSidebar();
+      const a = findExistingPendingLink(sidebar);
+      if (!a) return; // link not present for this user/role
+
+      const badge = ensureBadge(a);
+      if (!badge) return;
+
+      const res = await fetch(countsUrl, { credentials: "same-origin" });
+      if (!res.ok) return;
+
       const data = await res.json();
-      const total = data.total || 0;
+      const total = Number(data.total || 0);
 
-      const item = createMenuItem();
-      if(!item) return;
-
-      const badge = item.querySelector(".pending-badge");
-      badge.textContent = total;
-
+      badge.textContent = String(total);
       badge.style.display = total > 0 ? "inline-block" : "none";
-
-    }catch(e){}
+    } catch (e) {
+      // silent
+    }
   }
 
-  document.addEventListener("DOMContentLoaded", ()=>{
+  document.addEventListener("DOMContentLoaded", () => {
     updateBadge();
     setInterval(updateBadge, 60000);
   });
-
 })();
 </script>
+
 {% endblock %}

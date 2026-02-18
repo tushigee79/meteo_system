@@ -1,4 +1,4 @@
-{% extends "admin/base_site.html" %}
+﻿{% extends "admin/base_site.html" %}
 {% load static %}
 
 {# =========================================================
@@ -270,7 +270,7 @@
         <div class="legend" id="legendPriority">
           <div class="legend-title">Маркер өнгө (priority)</div>
           <div class="legend-item" style="cursor:default;">
-            <span class="dot" style="background:#f59e0b;"></span> 🟠 Pending workflow
+            <span class="dot" style="background:#f59e0b;"></span> 🟠 Хүлээгдэж буй ажлууд
           </div>
           <div class="legend-item" style="cursor:default;">
             <span class="dot" style="background:#ef4444;"></span> 🔴 Эвдэрсэн
@@ -468,7 +468,7 @@ document.addEventListener("click", (ev) => {
     // --- Marker color priority (pending > broken > empty > ok) ---
     let markerColor = TYPE_COLORS[t] || TYPE_COLORS.OTHER;
 
-    // 🔶 Pending workflow priority
+    // 🔶 Хүлээгдэж буй ажлууд priority
     if (Number(pendingTotal || 0) > 0) {
       markerColor = "#f59e0b"; // orange
     }
