@@ -116,7 +116,9 @@
 {{ calib_stats_json|default_if_none:"[]"|json_script:"calib-data" }}
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-
+<script src="{% static 'inventory/vendor/echarts/echarts.min.js' %}"></script>
+<script src="{% static 'inventory/js/home.js' %}"></script>
+{% endblock %}
 <script>
   function readJson(id) {
     const el = document.getElementById(id);

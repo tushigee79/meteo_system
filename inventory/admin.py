@@ -1,5 +1,4 @@
 # inventory/admin.py
-# inventory/admin.py
 from __future__ import annotations
 
 import io
@@ -9,13 +8,14 @@ import uuid
 from typing import Any, Dict, Optional
 
 import qrcode
+from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
 from django.core.cache import cache
 from django.core.files.base import ContentFile
 from django.core.exceptions import FieldError
 from django.db.models import Count, Q, QuerySet
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse, request
 from django.shortcuts import get_object_or_404
 from django.urls import path, reverse
 from django.utils import timezone
@@ -24,6 +24,7 @@ from django.utils.text import slugify
 from .admin_site import inventory_admin_site
 
 
+from .forms import DeviceAdminForm
 from .models import (
     Aimag, SumDuureg, Organization, Location, InstrumentCatalog,
     Device, MaintenanceService, ControlAdjustment, MaintenanceEvidence,
@@ -96,6 +97,53 @@ def _scope_location_qs(request: HttpRequest) -> QuerySet[Location]:
     if scope["aimag_id"] == 1 and scope["sum_id"]:
         qs = qs.filter(sum_ref_id=scope["sum_id"])
     return qs
+
+
+# ============================================================
+# Forms
+# ============================================================
+
+class DeviceAdminForm(forms.ModelForm):
+    admin_aimag = forms.ModelChoiceField(
+        queryset=Aimag.objects.all(),
+        required=False,
+        label="Аймаг / Улаанбаатар",
+    )
+    admin_sum = forms.ModelChoiceField(
+        queryset=SumDuureg.objects.none(),
+        required=False,
+        label="Сум / Дүүрэг",
+    )
+
+    class Meta:
+        model = Device
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        self.request = kwargs.pop("request", None)
+        super().__init__(*args, **kwargs)
+
+        # ===== Аймгийн инженер =====
+        scope = _get_scope(self.request) if self.request else {}
+        if not scope.get("all"):
+            aimag_id = scope.get("aimag_id")
+            if aimag_id:
+                self.fields["admin_aimag"].queryset = Aimag.objects.filter(id=aimag_id)
+                self.fields["admin_aimag"].initial = aimag_id
+                self.fields["admin_aimag"].disabled = True
+
+                self.fields["admin_sum"].queryset = SumDuureg.objects.filter(
+                    aimag_ref_id=aimag_id
+                )
+
+        # ===== Edit үед location-оос initial тааруулах =====
+        if self.instance and self.instance.location_id:
+            loc = self.instance.location
+            self.fields["admin_aimag"].initial = loc.aimag_ref_id
+            self.fields["admin_sum"].queryset = SumDuureg.objects.filter(
+                aimag_ref_id=loc.aimag_ref_id
+            )
+            self.fields["admin_sum"].initial = loc.sum_ref_id
 
 
 # ============================================================
@@ -405,7 +453,9 @@ class LocationAdmin(admin.ModelAdmin):
         return format_html('<a class="button" href="{}" target="_blank" rel="noopener">Нээх</a>', url)
 
 
+@admin.register(Device)
 class DeviceAdmin(admin.ModelAdmin):
+    form = DeviceAdminForm
     actions = [generate_qr, revoke_qr, download_device_passport]
 
     inlines = [MaintenanceHistoryInline, ControlHistoryInline]
@@ -422,7 +472,12 @@ class DeviceAdmin(admin.ModelAdmin):
     list_filter = ("kind", "status")
     search_fields = ("serial_number", "inventory_code", "other_name", "location__name")
     ordering = ("-id",)
-    readonly_fields = ("qr_preview",)
+
+    readonly_fields = (
+        "qr_preview",
+        "location_latitude",
+        "location_longitude",
+    )
 
     class Media:
         js = (
@@ -430,8 +485,22 @@ class DeviceAdmin(admin.ModelAdmin):
             "inventory/js/admin/device_location_filter_enterprise.js",
         )
 
+    def get_form(self, request, obj=None, **kwargs):
+        Form = super().get_form(request, obj, **kwargs)
+
+        class RequestForm(Form):
+            def __init__(self2, *args, **kw):
+                kw["request"] = request
+                super().__init__(*args, **kw)
+
+        return RequestForm
+
     def get_queryset(self, request: HttpRequest) -> QuerySet:
-        qs = super().get_queryset(request).select_related("location", "location__aimag_ref", "location__sum_ref")
+        qs = (
+            super()
+            .get_queryset(request)
+            .select_related("location", "location__aimag_ref", "location__sum_ref")
+        )
         return _scope_qs(request, qs, aimag_field="location__aimag_ref")
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
@@ -439,35 +508,43 @@ class DeviceAdmin(admin.ModelAdmin):
             kwargs["queryset"] = _scope_location_qs(request).order_by("name")
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-    def get_urls(self):
-        urls = super().get_urls()
-        custom = [
-            path(
-                "<int:object_id>/passport/",
-                self.admin_site.admin_view(self.passport_view),
-                name="inventory_device_passport",
-            ),
-            path("catalog-by-kind/", self.admin_site.admin_view(self.catalog_by_kind_view), name="device_catalog_by_kind"),
-            path("location-options/", self.admin_site.admin_view(self.location_options_view), name="device_location_options"),
-        ]
-        return custom + urls
-
     @admin.display(description="QR")
     def qr_preview(self, obj: Device):
         img = getattr(obj, "qr_image", None)
-        if not img:
-            return "-"
-        try:
-            return format_html('<img src="{}" style="height:40px;border:1px solid #ddd;border-radius:6px;" />', img.url)
-        except Exception:
-            return "QR"
+        if img:
+            try:
+                return format_html(
+                    '<img src="{}" style="height:64px;width:64px;object-fit:contain;border:1px solid #ddd;border-radius:6px;" />',
+                    img.url,
+                )
+            except Exception:
+                pass
+
+        tok = getattr(obj, "qr_token", None)
+        if tok:
+            return format_html("<code>{}</code>", tok)
+
+        return "-"
+
+    @admin.display(description="Өргөрөг")
+    def location_latitude(self, obj):
+        if obj and obj.location:
+            return getattr(obj.location, "latitude", "-")
+        return "-"
+
+    @admin.display(description="Уртраг")
+    def location_longitude(self, obj):
+        if obj and obj.location:
+            return getattr(obj.location, "longitude", "-")
+        return "-"
 
     def passport_view(self, request: HttpRequest, object_id: int):
-        if not generate_device_passport_pdf_bytes:
-            return HttpResponse("PDF generator not available", status=500)
+        from .pdf_passport import generate_device_passport_pdf_bytes
 
         device = get_object_or_404(Device, pk=object_id)
         data = generate_device_passport_pdf_bytes(device, request=request)
+        if not data:
+            return HttpResponse("PDF generator not available", status=500)
 
         filename = f"device_passport_{device.pk}.pdf"
         resp = HttpResponse(data, content_type="application/pdf")
@@ -479,30 +556,128 @@ class DeviceAdmin(admin.ModelAdmin):
         qs = InstrumentCatalog.objects.all()
         if kind:
             qs = qs.filter(kind=kind)
-        if hasattr(InstrumentCatalog, "is_active"):
-            qs = qs.filter(is_active=True)
+
         return JsonResponse(
-            {"results": [{"id": x.id, "text": f"{x.code} - {x.name_mn}"} for x in qs.order_by("code")]}
+            {"results": [{"id": x.id, "text": f"{x.code} - {x.name_mn}"} for x in qs.order_by("code")]},
+            json_dumps_params={"ensure_ascii": False},
         )
 
     def location_options_view(self, request: HttpRequest):
-        aimag_id = (request.GET.get("aimag") or "").strip() or None
-        sum_id = (request.GET.get("sum") or "").strip() or None
+        raw_aimag_id = (request.GET.get("aimag") or "").strip()
+        raw_sum_id = (request.GET.get("sum") or "").strip()
+
+        try:
+            aimag_id = int(raw_aimag_id) if raw_aimag_id else None
+        except (TypeError, ValueError):
+            aimag_id = None
+
+        try:
+            sum_id = int(raw_sum_id) if raw_sum_id else None
+        except (TypeError, ValueError):
+            sum_id = None
+
         qs = _scope_location_qs(request).order_by("name")
+
         if aimag_id:
             qs = qs.filter(aimag_ref_id=aimag_id)
+
         if sum_id:
             qs = qs.filter(sum_ref_id=sum_id)
-        return JsonResponse([{"id": l.id, "name": l.name} for l in qs], safe=False)
+
+        data = [{"id": l.id, "name": l.name} for l in qs[:500]]
+        return JsonResponse(data, safe=False, json_dumps_params={"ensure_ascii": False})
+
+    def load_sums_view(self, request: HttpRequest):
+        raw_aimag_id = (request.GET.get("aimag_id") or "").strip()
+
+        try:
+            aimag_id = int(raw_aimag_id) if raw_aimag_id else None
+        except (TypeError, ValueError):
+            aimag_id = None
+
+        if not aimag_id:
+            return JsonResponse([], safe=False, json_dumps_params={"ensure_ascii": False})
+
+        qs = SumDuureg.objects.filter(aimag_ref_id=aimag_id).order_by("name")
+        data = [{"id": s.id, "name": s.name} for s in qs]
+        return JsonResponse(data, safe=False, json_dumps_params={"ensure_ascii": False})
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "catalog-by-kind/",
+                self.admin_site.admin_view(self.catalog_by_kind_view),
+                name="device_catalog_by_kind",
+            ),
+            path(
+                "location-options/",
+                self.admin_site.admin_view(self.location_options_view),
+                name="device_location_options",
+            ),
+            path(
+                "load-sums/",
+                self.admin_site.admin_view(self.load_sums_view),
+                name="device_load_sums",
+            ),
+            path(
+                "<path:object_id>/passport/",
+                self.admin_site.admin_view(self.passport_view),
+                name="device_passport_view",
+            ),
+        ]
+        return custom + urls
+
+    fieldsets = (
+        ("Ерөнхий мэдээлэл", {
+            "fields": (
+                "catalog_item",
+                "other_name",
+                "serial_number",
+                "inventory_code",
+                "kind",
+                "system",
+                "status",
+                "installation_date",
+                "lifespan_years",
+            )
+        }),
+        ("Байршил", {
+            "fields": (
+                "admin_aimag",
+                "admin_sum",
+                "location",
+                "location_latitude",
+                "location_longitude",
+            )
+        }),
+        ("QR", {
+            "fields": (
+                "qr_image",
+                "qr_preview",
+            )
+        }),
+    )
 
     def has_delete_permission(self, request, obj=None):
         return request.user.is_superuser
 
-
 class MaintenanceServiceAdmin(admin.ModelAdmin):
-    list_display = ("date", "device", "workflow_status", "performer_type", "performer_engineer_name", "performer_org_name")
-    list_filter = ("workflow_status", "performer_type")
-    search_fields = ("device__serial_number", "device__inventory_code", "reason", "note")
+    list_display = (
+        "date", 
+        "device", 
+        "reason", 
+        "workflow_status", 
+        "performer_type", 
+        "performer_engineer_name", 
+        "performer_org_name"
+    )
+    list_filter = ("reason", "workflow_status", "performer_type")
+    search_fields = (
+        "device__serial_number", 
+        "device__inventory_code", 
+        "note"
+    )
     ordering = ("-date", "-id")
     inlines = [MaintenanceEvidenceInline]
 
@@ -510,13 +685,17 @@ class MaintenanceServiceAdmin(admin.ModelAdmin):
         js = ("inventory/js/admin/performer_toggle.js",)
 
     def get_queryset(self, request: HttpRequest) -> QuerySet:
-        qs = super().get_queryset(request).select_related("device", "device__location", "device__location__aimag_ref", "device__location__sum_ref")
+        qs = super().get_queryset(request).select_related(
+            "device", 
+            "device__location", 
+            "device__location__aimag_ref", 
+            "device__location__sum_ref"
+        )
         return _scope_qs(request, qs, aimag_field="device__location__aimag_ref")
 
     def has_delete_permission(self, request, obj=None):
         return request.user.is_superuser
-
-
+    
 class ControlAdjustmentAdmin(admin.ModelAdmin):
     list_display = ("date", "device", "result", "workflow_status", "performer_type", "performer_engineer_name", "performer_org_name")
     list_filter = ("result", "workflow_status", "performer_type")
@@ -598,11 +777,7 @@ def register_with(site):
         try:
             class AuditEventAdmin(admin.ModelAdmin):
                 ordering = ("-id",)
-                # ❌ Алдаатай байсан хэсэг: "action", "username"
-                # ✅ Зассан хэсэг: Зөвхөн баталгаатай байгаа талбаруудыг үлдээх
                 list_display = ("id", "created_at") if hasattr(AuditEvent, "created_at") else ("id",)
-                
-                # Хэрэв та заавал харахыг хүсэж байвал hasattr-аар шалгаж нэмж болно
                 search_fields = ("id",)
                 
             site.register(AuditEvent, AuditEventAdmin)

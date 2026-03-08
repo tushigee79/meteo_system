@@ -12,6 +12,8 @@ urlpatterns = [
     path("api/reports/sums/", rhc.reports_sums_by_aimag, name="reports-sums-json"),
     path("api/reports/charts/", rhc.reports_chart_json, name="reports-chart-json"),
     path("ajax/load-sums/", views.load_sums, name="ajax_load_sums"),
+    path("ajax/location-options/", views.location_options, name="ajax_location_options"),
+    path("ajax/location-by-sum/", views.location_by_sum, name="ajax_location_by_sum"),
 
     path("admin/dashboard/table/", dashboard_table_view, name="dashboard_table"),
     path("admin/dashboard/graph/", dashboard_graph_view, name="dashboard_graph"),

@@ -3,7 +3,11 @@ from django.http import JsonResponse
 from django.shortcuts import render, get_object_or_404
 from django.db.models import Count
 from django.core.serializers.json import DjangoJSONEncoder
+from django.contrib.admin.views.decorators import staff_member_required
+from django.views.decorators.http import require_GET
+
 import json
+from .models import Location
 
 from inventory.models import Location, SumDuureg
 
@@ -162,4 +166,33 @@ def dashboard_cards(request):
     return render(request, "inventory/dashboard.html", {
         "ok": True,
         "cards": []
+    })
+
+@staff_member_required
+@require_GET
+def location_options(request):
+    """
+    Single-admin mode:
+      system_id + (optional) kind -> location options
+    """
+    system_id = (request.GET.get("system_id") or "").strip()
+    kind = (request.GET.get("kind") or "").strip().upper()
+
+    qs = Location.objects.all()
+
+    if system_id:
+        # Хэрвээ Location дээр FK нэр чинь өөр (system_ref гэх мэт) бол энд солино
+        qs = qs.filter(system_id=system_id)
+
+    # kind-ээр шүүх (танайд Location дээр location_type эсвэл kind-тэй холбоотой field байвал тааруул)
+    if kind:
+        # 1) Хэрвээ Location.location_type байгаа бол:
+        qs = qs.filter(location_type__iexact=kind)
+
+        # 2) Хэрвээ өөр field ашигладаг бол дээрх мөрийг солино.
+
+    qs = qs.order_by("name")[:2000]
+
+    return JsonResponse({
+        "results": [{"id": o.id, "text": o.name} for o in qs]
     })
