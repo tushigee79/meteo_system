@@ -38,6 +38,12 @@ def reports_export_locations_csv(request, *args, **kwargs):
         return HttpResponse("Locations CSV export not implemented.", content_type="text/plain", status=501)
     return fn(request, *args, **kwargs)
 
+def reports_export_devices_xlsx(request, *args, **kwargs):
+    from . import reports_hub as rh
+    fn = getattr(rh, "reports_export_devices_xlsx", None)
+    if not fn:
+        return HttpResponse("Devices XLSX export not implemented.", content_type="text/plain", status=501)
+    return fn(request, *args, **kwargs)
 
 def reports_export_movements_csv(request, *args, **kwargs):
     from . import reports_hub as rh
