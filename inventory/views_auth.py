@@ -29,7 +29,7 @@ def force_password_change(request):
 
     # profile байхгүй бол шууд dashboard руу
     if not profile:
-        return redirect("/admin/dashboard/")
+        return redirect("/django-admin/dashboard/general/")
 
     if request.method == "POST":
         form = PasswordChangeForm(user=request.user, data=request.POST)
@@ -51,7 +51,7 @@ def force_password_change(request):
                 extra={"forced": True, "at": timezone.now().isoformat()},
             )
 
-            return redirect("/admin/dashboard/")
+            return redirect("/django-admin/dashboard/general/")
     else:
         form = PasswordChangeForm(user=request.user)
 
