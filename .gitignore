@@ -1,70 +1,69 @@
-venv/
-__pycache__/
-*.pyc
-db.sqlite3
-.env
-media/
-static/
+# =========================
 
-# Envs / secrets
+# Python
+
+# =========================
+
+**pycache**/
+*.py[cod]
+*.pyo
+*.pyd
+*.log
+
+# =========================
+
+# Virtual environment
+
+# =========================
+
+venv/
+.venv/
+
+# =========================
+
+# Django
+
+# =========================
+
+db.sqlite3
+*.sqlite3
+media/
+staticfiles/
+
+# =========================
+
+# Environment / secrets
+
+# =========================
+
 .env
 .env.*
 *.env
-.env.txt
 
-# Python
-__pycache__/
-*.py[cod]
-*.log
+# =========================
 
-# Virtualenv
-venv/
-.venv/
+# OS files
 
-# Django
-db.sqlite3
-media/
-staticfiles/
+# =========================
 
-# OS
 .DS_Store
 Thumbs.db
-staticfiles/
-# local backups / exports
-*.zip
-inventory/templates/admin/inventory/instrumentcatalog__DISABLED/
 
-*.bak
-*.sqlite3
-import_data/
-__untracked_backup__/
-__untracked_hold__/
+# =========================
 
+# Backups / temp
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Django / local
-.env
-*.sqlite3
-media/
-
-# Virtual env
-venv/
-.venv/
-
-# OS
-.DS_Store
-Thumbs.db
+# =========================
 
 *.bak
 *.bak2
 *.rej
 *.patch
 *.gitpatch
-*_snippet.py
-views_*_snippet.txt
+*.zip
 
+# Local data / imports
+
+import_data/
+**untracked_backup**/
+**untracked_hold**/
