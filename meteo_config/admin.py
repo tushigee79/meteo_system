@@ -409,7 +409,7 @@ class LocationAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
             qs = self.get_queryset(request)
 
         extra_context["locations_json"] = json.dumps(_build_locations_payload(qs), ensure_ascii=False)
-        extra_context["map_url"] = reverse("inventory_map")  # full map route (outside admin)
+        extra_context["map_url"] = reverse("inventory:inventory_map")  # full map route (outside admin)
 
         return super().changelist_view(request, extra_context=extra_context)
 
@@ -428,7 +428,7 @@ class LocationAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
         # This is an admin wrapper page (if you use it). It can render your public /inventory/map/
         return TemplateResponse(request, "inventory/admin/location_map_embed.html", {
             "title": "Газрын зураг",
-            "map_url": reverse("inventory_map"),
+            "map_url": reverse("inventory:inventory_map"),
         })
 
     def map_one_view(self, request):

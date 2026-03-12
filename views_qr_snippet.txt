@@ -1,0 +1,22 @@
+# inventory/views.py (ADD THESE)
+from django.shortcuts import render, get_object_or_404, redirect
+from django.contrib.admin.views.decorators import staff_member_required
+from django.http import HttpRequest
+
+from .models import Device
+
+@staff_member_required
+def qr_device_lookup(request: HttpRequest, token):
+    """
+    Staff-only: QR token -> admin change page.
+    (Optional) If you have role scoping, replace Device.objects with your _scope_devices(request).
+    """
+    device = get_object_or_404(Device.objects.all(), qr_token=token)
+    return redirect(f"/django-admin/inventory/device/{device.pk}/change/")
+
+def qr_device_public_view(request: HttpRequest, token):
+    """
+    Public read-only QR page (no login).
+    """
+    device = get_object_or_404(Device.objects.all(), qr_token=token)
+    return render(request, "inventory/qr_device_public.html", {"device": device})

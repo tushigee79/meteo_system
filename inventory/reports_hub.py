@@ -339,7 +339,7 @@ def reports_hub_view(request: HttpRequest, admin_site: Optional[AdminSite] = Non
         "KIND_CHOICES": kind_choices,
         "STATUS_CHOICES": status_choices,
         "LOCATION_TYPE_CHOICES": location_type_choices,
-        "hub_url": _safe_reverse(ns, "reports-hub"),
+        "hub_url": _safe_reverse("inventory_admin", "reports_hub"),
         "chart_url": _safe_reverse(ns, "reports-chart-json"),
         "sums_url": _safe_reverse(ns, "reports-sums-json"),
     })

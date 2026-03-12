@@ -1,0 +1,22 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>Ерөнхий dashboard</h1>
+
+<h2>Төхөөрөмж төрлөөр</h2>
+<ul>
+  {% for row in devices_by_kind %}
+    <li>{{ row.kind }} — {{ row.total }}</li>
+  {% empty %}
+    <li>Өгөгдөл алга</li>
+  {% endfor %}
+</ul>
+
+<h2>Байршил төрлөөр</h2>
+<ul>
+  {% for row in locations_by_type %}
+    <li>{{ row.location_type }} — {{ row.total }}</li>
+  {% empty %}
+    <li>Өгөгдөл алга</li>
+  {% endfor %}
+</ul>
+{% endblock %}

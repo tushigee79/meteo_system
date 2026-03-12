@@ -1,0 +1,38 @@
+{
+  "name": "Ops-VCP-Khovd-85",
+  "antenna": "8.5m",
+  "hpbw_deg": 0.46,
+  "base_elevations_deg": [
+    0.5,
+    1.0,
+    1.5,
+    2.0,
+    3.0,
+    4.0,
+    6.0,
+    9.0,
+    12.0,
+    15.0
+  ],
+  "sector_rules": [
+    {
+      "az_start_deg": 146.0,
+      "az_end_deg": 164.0,
+      "range_km_max": 15.0,
+      "min_elevation_deg": 1.0,
+      "note": "Skip 0.5° within clutter-heavy sector near SSE"
+    }
+  ],
+  "prf": {
+    "short_km_max": 75,
+    "long_km_max": 200
+  },
+  "quantitative_range_km": 200,
+  "surveillance_extra": {
+    "enabled": true,
+    "max_km": 350,
+    "products": [
+      "Z"
+    ]
+  }
+}

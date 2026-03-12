@@ -1,25 +1,26 @@
-# meteo_config/urls.py
 from django.conf import settings
 from django.conf.urls.static import static
-from django.shortcuts import redirect
-from django.urls import path, include
+from django.contrib import admin as django_default_admin
+from django.urls import include, path, re_path
+from django.views.generic import RedirectView
 
 from inventory.admin import inventory_admin_site
 
 urlpatterns = [
-    # 1) APP routes (namespace = inventory)
     path("", include(("inventory.urls", "inventory"), namespace="inventory")),
 
-    # 2) Admin site
-    path("django-admin/", inventory_admin_site.urls),
+    # Main custom admin
+    path("admin/", inventory_admin_site.urls),
 
-    # 3) Redirect shortcuts
-    path("admin/login/",  lambda request: redirect("/django-admin/login/", permanent=False)),
-    path("admin/logout/", lambda request: redirect("/django-admin/logout/", permanent=False)),
-    path("admin/",        lambda request: redirect("/django-admin/", permanent=False)),
+    # Legacy redirect
+    re_path(
+        r"^django-admin/(?P<extra>.*)$",
+        RedirectView.as_view(url="/admin/%(extra)s", permanent=False),
+    ),
+
+    # Default Django admin
+    path("system-admin/", django_default_admin.site.urls),
 ]
 
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
-    if getattr(settings, "MEDIA_URL", None) and getattr(settings, "MEDIA_ROOT", None):
-        urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

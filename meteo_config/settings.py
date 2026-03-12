@@ -135,17 +135,14 @@ JAZZMIN_SETTINGS = {
                 "permissions": ["inventory.view_device"],
             },
             {
-                "name": "Dashboard (График)",
-                "url": "/admin/dashboard/graph/",
-                "icon": "fas fa-chart-bar",
-                "permissions": ["inventory.view_device"],
-            },
+                "name": "Тайлан", 
+                "url": "inventory_admin:reports_hub", 
+                "permissions": ["inventory.view_device"]},
             {
-                "name": "Газрын зураг",
-                "url": "inventory_map",
-                "icon": "fas fa-map",
-                "permissions": ["inventory.view_location"],
-            },
+                "name": "Газрын зураг", 
+                "url": "inventory:inventory_map", 
+                "permissions": ["inventory.view_location"]},
+            
             {
                 "name": "Газрын зураг (8 төрөл)",
                 "url": "/inventory/map/",

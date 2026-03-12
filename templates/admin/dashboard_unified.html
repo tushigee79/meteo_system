@@ -1,0 +1,592 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .legacy-wrap {
+    padding: 16px 10px 30px;
+  }
+
+  .legacy-title {
+    font-size: 34px;
+    font-weight: 800;
+    margin: 0 0 16px;
+  }
+
+  .legacy-subtitle {
+    color: #6b7280;
+    font-size: 14px;
+    margin-bottom: 18px;
+  }
+
+  .legacy-toolbar {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(160px, 1fr)) auto auto;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .legacy-toolbar input,
+  .legacy-toolbar select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid rgba(0, 0, 0, .14);
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  .btn {
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(0, 0, 0, .1);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    cursor: pointer;
+    background: #fff;
+    color: inherit;
+  }
+
+  .btn.primary {
+    background: #1d4ed8;
+    color: #fff;
+    border-color: #1d4ed8;
+  }
+
+  .legacy-grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(220px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  .legacy-grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(260px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  .legacy-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  .legacy-card {
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, .08);
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, .04);
+  }
+
+  .legacy-card h3 {
+    margin: 0 0 14px;
+    font-size: 18px;
+    font-weight: 800;
+  }
+
+  .kpi-label {
+    font-size: 13px;
+    color: #6b7280;
+    margin-bottom: 8px;
+  }
+
+  .kpi-value {
+    font-size: 34px;
+    font-weight: 900;
+    line-height: 1;
+  }
+
+  .kpi-help {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #6b7280;
+  }
+
+  .pill {
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    display: inline-block;
+    margin: 6px 6px 0 0;
+  }
+
+  .red { background: #fee2e2; color: #991b1b; }
+  .orange { background: #ffedd5; color: #9a3412; }
+  .blue { background: #dbeafe; color: #1d4ed8; }
+  .green { background: #dcfce7; color: #166534; }
+  .gray { background: #f3f4f6; color: #374151; }
+
+  .chart-box {
+    width: 100%;
+    height: 300px;
+  }
+
+  .table-wrap {
+    overflow: auto;
+  }
+
+  .legacy-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .legacy-table th,
+  .legacy-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(0, 0, 0, .06);
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .legacy-table th {
+    font-weight: 800;
+  }
+
+  .summary-list {
+    margin: 0;
+    padding-left: 18px;
+  }
+
+  .summary-list li {
+    margin: 8px 0;
+  }
+
+  .quick-links {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .muted {
+    color: #6b7280;
+    font-size: 13px;
+  }
+
+  @media (max-width: 1300px) {
+    .legacy-grid-4,
+    .legacy-grid-3,
+    .legacy-grid-2,
+    .legacy-toolbar {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  @media (max-width: 800px) {
+    .legacy-grid-4,
+    .legacy-grid-3,
+    .legacy-grid-2,
+    .legacy-toolbar {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="legacy-wrap">
+  <div class="legacy-title">Хуучин Dashboard</div>
+  <div class="legacy-subtitle">Өмнөх хувилбарын нэгтгэсэн харагдац</div>
+
+  <script>
+    window.__dashboardSummaryUrl = "{% url 'inventory_admin:dashboard_summary_json' %}";
+  </script>
+
+  <form method="get" id="legacyFilterForm" class="legacy-toolbar">
+    <input
+      type="text"
+      name="q"
+      placeholder="Хайх нэр / serial / code..."
+      value="{{ filter.q }}"
+    >
+
+    <select name="aimag">
+      <option value="">-- Бүх аймаг --</option>
+      {% for id, name in aimag_choices %}
+      <option value="{{ id }}" {% if filter.aimag == id|stringformat:"s" %}selected{% endif %}>
+        {{ name }}
+      </option>
+      {% endfor %}
+    </select>
+
+    <select name="kind">
+      <option value="">-- Бүх төрөл --</option>
+      {% for k, v in kind_choices %}
+      <option value="{{ k }}" {% if filter.kind == k %}selected{% endif %}>
+        {{ v }}
+      </option>
+      {% endfor %}
+    </select>
+
+    <select name="status">
+      <option value="">-- Бүх төлөв --</option>
+      {% for k, v in status_choices %}
+      <option value="{{ k }}" {% if filter.status == k %}selected{% endif %}>
+        {{ v }}
+      </option>
+      {% endfor %}
+    </select>
+
+    <select name="location_type">
+      <option value="">-- Бүх байршлын төрөл --</option>
+      <option value="AWS" {% if filter.location_type == "AWS" %}selected{% endif %}>AWS</option>
+      <option value="HYDRO" {% if filter.location_type == "HYDRO" %}selected{% endif %}>HYDRO</option>
+      <option value="WEATHER" {% if filter.location_type == "WEATHER" %}selected{% endif %}>WEATHER</option>
+      <option value="RADAR" {% if filter.location_type == "RADAR" %}selected{% endif %}>RADAR</option>
+      <option value="AEROLOGY" {% if filter.location_type == "AEROLOGY" %}selected{% endif %}>AEROLOGY</option>
+      <option value="AGRO" {% if filter.location_type == "AGRO" %}selected{% endif %}>AGRO</option>
+    </select>
+
+    <button class="btn primary" type="submit">Шүүх</button>
+    <a class="btn" href="{% url 'inventory_admin:dashboard_legacy' %}">Reset</a>
+  </form>
+
+  <div class="legacy-grid-4">
+    <div class="legacy-card">
+      <div class="kpi-label">Нийт багаж</div>
+      <div class="kpi-value" id="kpi_devices">{{ device_count }}</div>
+      <div class="kpi-help">Шүүлтүүртэй нийлбэр</div>
+    </div>
+
+    <div class="legacy-card">
+      <div class="kpi-label">Нийт байршил</div>
+      <div class="kpi-value" id="kpi_locations">{{ location_count }}</div>
+      <div class="kpi-help">Шүүлтүүртэй нийлбэр</div>
+    </div>
+
+    <div class="legacy-card">
+      <div class="kpi-label">Expired calibration</div>
+      <div class="kpi-value" id="kpi_expired">{{ due_counts.expired }}</div>
+      <div>
+        <span class="pill red">Expired: <span id="due_expired">{{ due_counts.expired }}</span></span>
+        <span class="pill orange">30 хоног: <span id="due_30">{{ due_counts.due_30 }}</span></span>
+        <span class="pill blue">90 хоног: <span id="due_90">{{ due_counts.due_90 }}</span></span>
+      </div>
+    </div>
+
+    <div class="legacy-card">
+      <div class="kpi-label">Pending workflow</div>
+      <div class="kpi-value" id="kpi_workflow">{{ workflow_counts.total }}</div>
+      <div>
+        <span class="pill gray">Засвар: <span id="wf_maint">{{ workflow_counts.maintenance_pending }}</span></span>
+        <span class="pill gray">Хяналт: <span id="wf_control">{{ workflow_counts.control_pending }}</span></span>
+        <span class="pill gray">Шилжилт: <span id="wf_move">{{ workflow_counts.movement_pending }}</span></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="legacy-grid-3">
+    <div class="legacy-card">
+      <h3>Калибровка төлөв</h3>
+      <div id="legacy_chart_due" class="chart-box"></div>
+    </div>
+
+    <div class="legacy-card">
+      <h3>Багаж төрлөөр</h3>
+      <div id="legacy_chart_kind" class="chart-box"></div>
+    </div>
+
+    <div class="legacy-card">
+      <h3>Төлвөөр</h3>
+      <div id="legacy_chart_status" class="chart-box"></div>
+    </div>
+  </div>
+
+  <div class="legacy-grid-2">
+    <div class="legacy-card">
+      <h3>Аймгаар байршлын тоо</h3>
+      <div class="table-wrap" style="max-height: 320px;">
+        <table class="legacy-table">
+          <thead>
+            <tr>
+              <th>Аймаг</th>
+              <th>Тоо</th>
+            </tr>
+          </thead>
+          <tbody id="legacy_aimag_rows">
+            {% for row in locations_by_aimag %}
+            <tr>
+              <td>{{ row.name }}</td>
+              <td>{{ row.total }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="2">Өгөгдөл алга</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="legacy-card">
+      <h3>Байршил төрлөөр</h3>
+      <div id="legacy_chart_location_type" class="chart-box" style="height: 260px;"></div>
+    </div>
+  </div>
+
+  <div class="legacy-grid-2">
+    <div class="legacy-card">
+      <h3>Сүүлийн бүртгэгдсэн багажууд</h3>
+      <div class="table-wrap">
+        <table class="legacy-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Нэр</th>
+              <th>Serial</th>
+              <th>Төрөл</th>
+              <th>Төлөв</th>
+              <th>Байршил</th>
+            </tr>
+          </thead>
+          <tbody id="legacy_recent_devices_rows">
+            {% for row in recent_devices %}
+            <tr>
+              <td><a href="/admin/inventory/device/{{ row.id }}/change/">{{ row.id }}</a></td>
+              <td>{{ row.name }}</td>
+              <td>{{ row.serial_number }}</td>
+              <td>{{ row.kind }}</td>
+              <td>{{ row.status }}</td>
+              <td>{{ row.location }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="6">Өгөгдөл алга</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="legacy-card">
+      <h3>Калибровка due жагсаалт</h3>
+      <div class="table-wrap" style="margin-bottom: 16px;">
+        <table class="legacy-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Нэр</th>
+              <th>Serial</th>
+              <th>Байршил</th>
+              <th>Огноо</th>
+              <th>Үлдсэн</th>
+            </tr>
+          </thead>
+          <tbody id="legacy_due_table_rows">
+            {% for row in due_table %}
+            <tr>
+              <td><a href="/admin/inventory/device/{{ row.id }}/change/">{{ row.id }}</a></td>
+              <td>{{ row.name }}</td>
+              <td>{{ row.serial_number }}</td>
+              <td>{{ row.location }}</td>
+              <td>{{ row.next_verification_date }}</td>
+              <td>
+                {% if row.days_left < 0 %}
+                  <span class="pill red">{{ row.days_left }}</span>
+                {% elif row.days_left <= 30 %}
+                  <span class="pill orange">{{ row.days_left }}</span>
+                {% elif row.days_left <= 90 %}
+                  <span class="pill blue">{{ row.days_left }}</span>
+                {% else %}
+                  <span class="pill green">{{ row.days_left }}</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="6">Өгөгдөл алга</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Shortcut</h3>
+      <div class="quick-links">
+        <a class="btn" href="{% url 'inventory_admin:dashboard_home' %}">Шинэ Dashboard</a>
+        <a class="btn" href="{% url 'inventory_admin:workflow_pending_dashboard' %}">Pending Workflow</a>
+        <a class="btn" href="{% url 'inventory_admin:reports_hub' %}">Тайлан</a>
+      </div>
+
+      <div class="muted" style="margin-top: 14px;">
+        Энэ хуудас нь хуучин dashboard загварыг тусад нь хадгалсан хувилбар.
+      </div>
+    </div>
+  </div>
+
+  <div class="legacy-card">
+    <h3>Товч summary</h3>
+    <ul class="summary-list">
+      <li>Нийт багаж: <strong id="sum_devices">{{ device_count }}</strong></li>
+      <li>Нийт байршил: <strong id="sum_locations">{{ location_count }}</strong></li>
+      <li>Expired calibration: <strong id="sum_expired">{{ due_counts.expired }}</strong></li>
+      <li>Pending workflow: <strong id="sum_workflow">{{ workflow_counts.total }}</strong></li>
+    </ul>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script>
+(function () {
+  function el(id) {
+    return document.getElementById(id);
+  }
+
+  function currentQueryString() {
+    const form = document.getElementById("legacyFilterForm");
+    const fd = new FormData(form);
+    const params = new URLSearchParams();
+
+    for (const [k, v] of fd.entries()) {
+      if ((v || "").toString().trim()) {
+        params.set(k, v);
+      }
+    }
+    return params.toString();
+  }
+
+  function withQuery(url) {
+    const qs = currentQueryString();
+    return qs ? (url + "?" + qs) : url;
+  }
+
+  function pieOption(title, rows) {
+    return {
+      tooltip: { trigger: "item" },
+      legend: { bottom: 0 },
+      series: [{
+        name: title,
+        type: "pie",
+        radius: ["35%", "70%"],
+        label: { formatter: "{b}: {c}" },
+        data: rows || []
+      }]
+    };
+  }
+
+  function barOption(rows) {
+    return {
+      tooltip: { trigger: "axis" },
+      xAxis: {
+        type: "category",
+        data: (rows || []).map(r => r.name),
+        axisLabel: { rotate: 35 }
+      },
+      yAxis: { type: "value" },
+      series: [{
+        type: "bar",
+        data: (rows || []).map(r => r.value),
+        barMaxWidth: 36
+      }]
+    };
+  }
+
+  const dueChart = echarts.init(el("legacy_chart_due"));
+  const kindChart = echarts.init(el("legacy_chart_kind"));
+  const statusChart = echarts.init(el("legacy_chart_status"));
+  const locationTypeChart = echarts.init(el("legacy_chart_location_type"));
+
+  async function refreshLegacySummary() {
+    try {
+      const res = await fetch(withQuery(window.__dashboardSummaryUrl), {
+        headers: { "X-Requested-With": "XMLHttpRequest" }
+      });
+      const data = await res.json();
+
+      el("kpi_devices").textContent = data.kpis.device_count;
+      el("kpi_locations").textContent = data.kpis.location_count;
+      el("kpi_expired").textContent = data.kpis.expired_count;
+      el("kpi_workflow").textContent = data.kpis.workflow_pending;
+
+      el("sum_devices").textContent = data.kpis.device_count;
+      el("sum_locations").textContent = data.kpis.location_count;
+      el("sum_expired").textContent = data.kpis.expired_count;
+      el("sum_workflow").textContent = data.kpis.workflow_pending;
+
+      el("due_expired").textContent = data.due_counts.expired;
+      el("due_30").textContent = data.due_counts.due_30;
+      el("due_90").textContent = data.due_counts.due_90;
+
+      el("wf_maint").textContent = data.workflow_counts.maintenance_pending;
+      el("wf_control").textContent = data.workflow_counts.control_pending;
+      el("wf_move").textContent = data.workflow_counts.movement_pending;
+
+      dueChart.setOption(pieOption("Калибровка", [
+        { name: "Expired", value: data.due_counts.expired },
+        { name: "30 хоног", value: data.due_counts.due_30 },
+        { name: "90 хоног", value: data.due_counts.due_90 },
+        { name: "OK", value: data.due_counts.ok },
+        { name: "Огноо алга", value: data.due_counts.empty }
+      ]));
+
+      kindChart.setOption(pieOption("Багаж төрлөөр", data.charts.kind));
+      statusChart.setOption(pieOption("Төлвөөр", data.charts.status));
+      locationTypeChart.setOption(barOption(data.charts.location_type));
+
+      const aimagBody = el("legacy_aimag_rows");
+      aimagBody.innerHTML = "";
+      (data.charts.aimag || []).forEach(function (row) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${row.name}</td><td>${row.value}</td>`;
+        aimagBody.appendChild(tr);
+      });
+
+      const recentBody = el("legacy_recent_devices_rows");
+      recentBody.innerHTML = "";
+      (data.recent_devices || []).forEach(function (row) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><a href="/admin/inventory/device/${row.id}/change/">${row.id}</a></td>
+          <td>${row.name || ""}</td>
+          <td>${row.serial_number || ""}</td>
+          <td>${row.kind || ""}</td>
+          <td>${row.status || ""}</td>
+          <td>${row.location || ""}</td>
+        `;
+        recentBody.appendChild(tr);
+      });
+
+      const dueBody = el("legacy_due_table_rows");
+      dueBody.innerHTML = "";
+      (data.due_table || []).forEach(function (row) {
+        let cls = "green";
+        if (row.days_left < 0) cls = "red";
+        else if (row.days_left <= 30) cls = "orange";
+        else if (row.days_left <= 90) cls = "blue";
+
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><a href="/admin/inventory/device/${row.id}/change/">${row.id}</a></td>
+          <td>${row.name || ""}</td>
+          <td>${row.serial_number || ""}</td>
+          <td>${row.location || ""}</td>
+          <td>${row.next_verification_date || ""}</td>
+          <td><span class="pill ${cls}">${row.days_left ?? ""}</span></td>
+        `;
+        dueBody.appendChild(tr);
+      });
+    } catch (err) {
+      console.error("refreshLegacySummary failed:", err);
+    }
+  }
+
+  refreshLegacySummary();
+
+  window.addEventListener("resize", function () {
+    dueChart.resize();
+    kindChart.resize();
+    statusChart.resize();
+    locationTypeChart.resize();
+  });
+})();
+</script>
+{% endblock %}
