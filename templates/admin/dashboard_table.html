@@ -1,110 +1,61 @@
 {% extends "admin/base_site.html" %}
+{% load static %}
+
 {% block content %}
-<div style="padding: 20px;">
-    <h1>Хяналтын самбар (Live Charts)</h1>
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-        <div id="status_chart" style="height: 400px; background: white; padding: 15px; border-radius: 10px;"></div>
-        <div id="workflow_chart" style="height: 400px; background: white; padding: 15px; border-radius: 10px;"></div>
+<div style="padding:20px;">
+  <div style="display:grid; grid-template-columns: 1.2fr 1fr; gap:20px; align-items:start;">
+    <div>
+      <h1 style="margin-top:0;">Хяналтын самбар (Live Charts)</h1>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <div id="status_chart" style="height: 340px; background:#fff; padding:15px; border-radius:10px; border:1px solid #eee;"></div>
+        <div id="workflow_chart" style="height: 340px; background:#fff; padding:15px; border-radius:10px; border:1px solid #eee;"></div>
+      </div>
     </div>
-</div>
 
-<div style="min-width:150px;">
-  <div class="k">Гүйцэтгэгч</div>
-  <input type="text" id="id_performer" placeholder="Нэр эсвэл төрөл...">
-</div>
+    <div>
+      <h1 style="margin-top:0;">Тайлангийн хүснэгт</h1>
 
-<div class="card" id="kpi_container" style="display:none; margin-bottom:15px;">
-    <div style="display:flex; gap:20px;">
+      <div id="kpi_box" class="card" style="display:flex; gap:30px; padding:15px; background:#fff; margin-bottom:15px; border-radius:10px; border:1px solid #ddd;">
         <div>Нийт ажил: <b id="kpi_total">0</b></div>
         <div style="color:green;">Дууссан: <b id="kpi_done">0</b></div>
         <div style="color:orange;">Хүлээгдэж буй: <b id="kpi_pending">0</b></div>
-    </div>
-</div>
+        <div style="margin-left:auto; opacity:.7; font-size: 12px;" id="ajax_state">Бэлэн</div>
+      </div>
 
-<div style="padding: 20px;">
-    <h1>Тайлангийн хүснэгт</h1>
-    
-    <div id="kpi_box" class="card" style="display:flex; gap:30px; padding:15px; background:#fff; margin-bottom:15px; border-radius:10px; border:1px solid #ddd;">
-        <div>Нийт ажил: <b id="kpi_total">0</b></div>
-        <div style="color:green;">Дууссан: <b id="kpi_done">0</b></div>
-        <div style="color:orange;">Хүлээгдэж буй: <b id="kpi_pending">0</b></div>
-    </div>
-
-    <div class="card" style="padding:15px; background:#f8f9fa; border-radius:10px; margin-bottom:15px;">
-        <select id="id_report">
+      <div class="card" style="padding:15px; background:#f8f9fa; border-radius:10px; margin-bottom:15px; border:1px solid #eee;">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px;">
+          <select id="id_report" style="padding: 5px; border-radius: 4px;">
             <option value="maintenance">Засвар үйлчилгээ</option>
             <option value="control">Хяналт тохируулга</option>
-        </select>
-        <input type="text" id="id_performer" placeholder="Гүйцэтгэгч хайх...">
-        <button onclick="loadTable()" style="background:#4e73df; color:#fff; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">Шүүх</button>
-    </div>
+          </select>
+          <input type="text" id="id_performer" placeholder="Гүйцэтгэгч (нэр/байгууллага) хайх..." style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+        </div>
 
-    <div class="card" style="background:#fff; border-radius:10px; overflow:hidden; border:1px solid #ddd;">
-        <table style="width:100%; border-collapse:collapse;">
-            <thead style="background:#f1f3f5;">
-                <tr id="table_head"></tr>
-            </thead>
-            <tbody id="tbody"></tbody>
-        </table>
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px;">
+          <input type="date" id="id_date_from" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+          <input type="date" id="id_date_to" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+          <button id="btn_filter" class="button default" type="button" style="cursor: pointer;">Шүүх</button>
+        </div>
+      </div>
     </div>
+  </div>
+
+  <div class="card" style="margin-top:18px; background:#fff; border-radius:10px; overflow:auto; border:1px solid #ddd; max-height: 500px;">
+    <table style="width:100%; border-collapse:collapse;">
+      <thead style="background:#f1f3f5; position: sticky; top: 0;">
+        <tr id="table_head"></tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <pre id="debugBox" style="display:none; white-space:pre-wrap; background:#111; color:#eee; padding:10px; border-radius:8px; margin-top:10px;"></pre>
 </div>
 
-<script>
-async function loadTable() {
-    const report = document.getElementById("id_report").value;
-    const performer = document.getElementById("id_performer").value;
-    const res = await fetch(`/reports/table.json?report=${report}&performer=${performer}`);
-    const result = await res.json();
-    
-    // KPI шинэчлэх
-    document.getElementById("kpi_total").textContent = result.meta.total || 0;
-    document.getElementById("kpi_done").textContent = result.meta.done || 0;
-    document.getElementById("kpi_pending").textContent = result.meta.pending || 0;
+<!-- ECharts (local) -->
+<script src="{% static 'inventory/vendor/echarts/echarts.min.js' %}"></script>
 
-    // Table шинэчлэх
-    const tbody = document.getElementById("tbody");
-    tbody.innerHTML = "";
-    result.data.forEach((r, i) => {
-        tbody.innerHTML += `<tr>
-            <td>${i+1}</td><td>${r.c1}</td><td>${r.c2}</td><td>${r.c3}</td>
-            <td>${r.c4}</td><td>${r.c5}</td><td>${r.c6}</td><td>${r.c7}</td>
-        </tr>`;
-    });
-}
-loadTable();
-</script>
-
-<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
-<script>
-(async () => {
-    const res = await fetch(window.location.pathname + "?ajax=1");
-    const data = await res.json();
-
-    // 1. Төлөв байдлын график (Timeline)
-    const sChart = echarts.init(document.getElementById('status_chart'));
-    sChart.setOption({
-        title: { text: 'Төхөөрөмжийн төлөв' },
-        tooltip: { trigger: 'axis' },
-        xAxis: { type: 'category', data: data.devices_by_status.axis },
-        yAxis: { type: 'value' },
-        series: Object.keys(data.devices_by_status.series).map(k => ({
-            name: k, type: 'line', data: data.devices_by_status.series[k]
-        }))
-    });
-
-    // 2. Үйл ажиллагааны график (Workflow)
-    const wChart = echarts.init(document.getElementById('workflow_chart'));
-    wChart.setOption({
-        title: { text: 'Засвар & Тохируулга' },
-        tooltip: { trigger: 'axis' },
-        xAxis: { type: 'category', data: data.workflow.axis },
-        yAxis: { type: 'value' },
-        series: [
-            { name: 'Засвар', type: 'bar', data: data.workflow.ms },
-            { name: 'Тохируулга', type: 'bar', data: data.workflow.ca }
-        ]
-    });
-    
-})();
-</script>
+<!-- Table + Charts JS (each only once) -->
+<script src="{% static 'inventory/js/dashboard_table.js' %}"></script>
+<script src="{% static 'inventory/js/dashboard_charts.js' %}"></script>
 {% endblock %}

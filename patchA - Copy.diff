@@ -1,0 +1,62 @@
+--- inventory/admin.py
++++ inventory/admin.py
+@@ -29,6 +29,7 @@
+ 
+ 
+ 
+from . import views_admin as va
+from . import views_workflow as wf
+from .pdf_passport import generate_device_passport_pdf_bytes
+
+ 
+ # ✅ Тайлан/Reports: нэг л газраас импортло (давхардуулахгүй)
+@@ -1240,12 +1241,22 @@
+             # ✅ debug (одоо ажиллана)
+             path("debug-hello/", self.admin_view(lambda r: HttpResponse("HELLO")), name="debug_hello"),
+ 
++
++            # ----------------------------
++            # Admin dashboards / data entry
++            # ----------------------------
++            path("dashboard/", self.admin_view(va.dashboard_home), name="dashboard_home"),
++            path("dashboard/table/", self.admin_view(va.dashboard_table), name="dashboard_table"),
++            path("dashboard/graph/", self.admin_view(va.dashboard_graph), name="dashboard_graph"),
++            path("data-entry/", self.admin_view(va.admin_data_entry), name="admin_data_entry"),
+             # ----------------------------
+             # Workflow dashboard & polling
+             # ----------------------------
+             path("inventory/workflow/pending/", self.admin_view(wf.workflow_pending_dashboard),
+                  name="workflow_pending_dashboard"),
+ 
++            path("inventory/workflow/pending/", self.admin_view(wf.workflow_pending_dashboard),
+               name="workflow_pending",
+),
+
+             # ✅ NEW alias (JS чинь үүнийг цохино)
+             path("inventory/workflow/pending-counts/", self.admin_view(wf.workflow_pending_counts),
+                  name="workflow_pending_counts_live"),
+@@ -1259,6 +1270,7 @@
+             path("inventory/workflow/audit/", self.admin_view(wf.workflow_audit_log),
+                  name="workflow_audit_log"),
+             
++            path("inventory/workflow/audit/", self.admin_view(wf.workflow_audit_log), name="workflow_audit"),
+             path("inventory/device/location-options/", self.admin_view(self.device_location_options_proxy),
+                 name="inventory_device_device_location_options",
+             ),
+@@ -1272,6 +1284,7 @@
+             # ----------------------------
+             # Reports (ЭНД wf БИШ, compat imports-оо ашигла!)
+             # ----------------------------
++            path("reports/", self.admin_view(reports_hub_view), name="reports_hub"),
+             path("reports/", self.admin_view(reports_hub_view), name="reports-hub"),
+             path("api/reports/charts/", self.admin_view(reports_chart_json), name="reports-chart-json"),
+             path("api/reports/sums/", self.admin_view(reports_sums_by_aimag), name="reports-sums-by-aimag"),
+@@ -1290,7 +1303,7 @@
+ 
+ 
+ # 2. Одоо классыг ашиглан объект (instance) үүсгэхэд алдаа гарахгүй
+-inventory_admin_site = InventoryAdminSite(name="inventory_admin")
++inventory_admin_site = InventoryAdminSite(name="admin")
+ 
+ # 3. Моделиудыг бүртгэх
+ inventory_admin_site.register(Aimag)

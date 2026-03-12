@@ -1,0 +1,146 @@
+diff --git a/inventory/admin.py b/inventory/admin.py
+index 1111111..2222222 100644
+--- a/inventory/admin.py
++++ b/inventory/admin.py
+@@ -1,7 +1,6 @@
+ from __future__ import annotations
+ 
+ # =========================================================
+-# STANDARD LIBRARY
++# STANDARD LIBRARY
+ # =========================================================
+ import io
+ import uuid
+@@ -11,13 +10,12 @@ from typing import Any, Dict, Optional
+ # =========================================================
+ # DJANGO CORE
+ # =========================================================
+-from django.conf import urls
+ from django.contrib import admin, messages
+ from django.contrib.admin import AdminSite
+ from django.contrib.admin.utils import unquote
+ from django.core.cache import cache
+ from django.core.files.base import ContentFile
+ from django.db.models import Count, QuerySet
+-from django.http import HttpRequest, HttpResponse, request
++from django.http import HttpRequest, HttpResponse
+ from django.shortcuts import redirect, render
+ from django.urls import path, reverse
+ from django.utils import timezone
+@@ -390,10 +388,13 @@ class DeviceAdmin(admin.ModelAdmin):
+         from .views import catalog_by_kind
+         return catalog_by_kind(request)
+ 
+     def passport_view(self, request, object_id):
+-        from django.http import HttpResponse
+-        return HttpResponse(f"Device Passport placeholder: {object_id}")
++        obj = self.get_object(request, object_id)
++        if not obj:
++            return HttpResponse("Not found", status=404)
++        pdf_bytes = generate_device_passport_pdf_bytes(obj)
++        response = HttpResponse(pdf_bytes, content_type="application/pdf")
++        response["Content-Disposition"] = f'inline; filename="passport_{obj.pk}.pdf"'
++        return response
+ 
+     def location_options_view(self, request):
+         from .views import location_options
+         return location_options(request)
+-        
+-    def catalog_by_kind_view(self, request):
+-        from .views import catalog_by_kind
+-        return catalog_by_kind(request)
+ 
+     def get_urls(self):
+         urls = super().get_urls()
+@@ -569,22 +570,38 @@ class InventoryAdminSite(AdminSite):
+             # Legacy / custom menu support
+             path(
+                 "data-entry/",
+-                self.admin_view(lambda request: redirect("/django-admin/inventory/device/")),
++                self.admin_view(
++                    lambda request: redirect(
++                        reverse(f"{self.name}:inventory_device_changelist")
++                    )
++                ),
+                 name="admin-data-entry",
+             ),
+             path(
+                 "dashboard/table/",
+-                self.admin_view(lambda request: redirect("/django-admin/reports/")),
++                self.admin_view(
++                    lambda request: redirect(
++                        reverse(f"{self.name}:reports-hub")
++                    )
++                ),
+                 name="dashboard-table",
+             ),
+             path(
+                 "dashboard/graph/",
+-                self.admin_view(lambda request: redirect("/django-admin/dashboard/general/")),
++                self.admin_view(
++                    lambda request: redirect(
++                        reverse(f"{self.name}:dashboard_general")
++                    )
++                ),
+                 name="dashboard-graph",
+             ),
+             path(
+                 "map/",
+-                self.admin_view(lambda request: redirect("/django-admin/inventory/location/map/")),
++                self.admin_view(
++                    lambda request: redirect(
++                        reverse(f"{self.name}:inventory_location_map")
++                    )
++                ),
+                 name="dashboard-map",
+             ),
+         ]
+         return custom_urls + urls
+diff --git a/inventory/urls.py b/inventory/urls.py
+index 3333333..4444444 100644
+--- a/inventory/urls.py
++++ b/inventory/urls.py
+@@ -10,8 +10,6 @@ urlpatterns = [
+     path("ajax/load-sums/", views.load_sums, name="ajax_load_sums"),
+     path("ajax/location-options/", views.location_options, name="ajax_location_options"),
+     path("ajax/location-by-sum/", views.location_by_sum, name="ajax_location_by_sum"),
+     path("ajax/catalog-by-kind/", views.catalog_by_kind, name="ajax_catalog_by_kind"),
+-
+-    path("admin/data-entry/", views.admin_data_entry, name="admin_data_entry"),
+ 
+     path("inventory/map/", views.location_map, name="inventory_map"),
+     path("inventory/map/<int:location_id>/", views.location_map, name="inventory_map_one"),
+@@ -22,7 +20,6 @@ urlpatterns = [
+ 
+     path("accounts/force-password-change/", force_password_change, name="inventory_force_password_change"),
+ 
+-    # Зассан хэсэг: Хаалт болон цэгийг зөв болгов
+     path("ajax/location-options-compat/", views.location_options, name="inventory_device_device_location_options"),
+     path("ajax/catalog-by-kind-compat/", views.catalog_by_kind, name="inventory_device_device_catalog_by_kind"),
+ ]
+diff --git a/meteo_config/urls.py b/meteo_config/urls.py
+index 5555555..6666666 100644
+--- a/meteo_config/urls.py
++++ b/meteo_config/urls.py
+@@ -1,16 +1,16 @@
+ # meteo_config/urls.py
+ from django.conf import settings
+ from django.conf.urls.static import static
+ from django.urls import path, include
+ from inventory.admin import inventory_admin_site
+-from django.contrib import admin as django_default_admin # Import-ыг дээр гаргалаа
++from django.contrib import admin as django_default_admin
+ 
+ urlpatterns = [
+     # 1. Апп-ын үндсэн замууд
+     path("", include(("inventory.urls", "inventory"), namespace="inventory")),
+ 
+-    # 2. Тусгай админ сайт
++    # 2. Үндсэн custom admin site
+     path("admin/", inventory_admin_site.urls),
+ 
+-    # 3. Стандарт Django админ
++    # 3. Default Django admin (service/debug only)
+     path("system-admin/", django_default_admin.site.urls),
+ ]
+ 

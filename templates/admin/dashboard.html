@@ -1,227 +1,196 @@
 {% extends "admin/base_site.html" %}
-{% load static %}
 
 {% block extrahead %}
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
     <style>
-    .card { border-radius: 10px; margin-bottom: 20px; border: none; }
-    .kpi-card { transition: transform 0.2s; box-shadow: 0 2px 12px rgba(0,0,0,0.15); }
-    .kpi-card:hover { transform: translateY(-3px); }
-    h5 { font-weight: 900; color: #333; margin-bottom: 20px; font-size: 16px; }
-    .chart-container { position: relative; height: 320px; }
-    .text-bold { font-weight: 800; }
-  </style>
+        .card { border-radius: 10px; margin-bottom: 20px; border: none; }
+        .kpi-card { transition: transform 0.2s; }
+        .kpi-card:hover { transform: scale(1.05); }
+        h5 { font-weight: bold; color: #444; margin-bottom: 15px; }
+        .chart-container { position: relative; height: 300px; }
+    </style>
 {% endblock %}
 
 {% block content %}
-<div class="content">
-  <div class="container-fluid">
-  <h2 class="mb-4 text-center font-weight-bold">{{ title }}</h2>
+<div class="container-fluid py-4">
+    <h2 class="mb-4 text-center font-weight-bold">{{ title }}</h2>
 
-  <div class="row mb-4">
-    <div class="col-md-3">
-      <div class="card kpi-card bg-primary text-white p-4 text-center">
-        <h2 class="text-bold">{{ total_devices }}</h2>
-        <p class="mb-0 opacity-80">Нийт багаж</p>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="card kpi-card bg-success text-white p-4 text-center">
-        <h2 class="text-bold">{{ active_devices }}</h2>
-        <p class="mb-0 opacity-80">Бэлэн (Ажиллаж буй)</p>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="card kpi-card bg-danger text-white p-4 text-center">
-        <h2 class="text-bold">{{ broken_devices }}</h2>
-        <p class="mb-0 opacity-80">Эвдрэлтэй / Засварт</p>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="card kpi-card bg-warning text-dark p-4 text-center">
-        <h2 class="text-bold">{{ expired_count }}</h2>
-        <p class="mb-0 opacity-80">Хугацаа дууссан</p>
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col-md-3">
-      <a href="{% url 'admin:inventory_device_changelist' %}?verification=expired">
-        <div class="card kpi-card border-left border-danger p-3 shadow-sm">
-          <h4 class="text-danger text-bold mb-1">{{ calib_expired }}</h4>
-          <p class="text-muted small mb-0">Калибровка дууссан</p>
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card kpi-card bg-primary text-white p-4 text-center shadow">
+                <h2 class="font-weight-bold">{{ total_devices }}</h2>
+                <p class="mb-0">Нийт багаж</p>
+            </div>
         </div>
-      </a>
-    </div>
-    <div class="col-md-3">
-      <a href="/django-admin/inventory/device/?verification=due_30" class="text-decoration-none">
-        <div class="card kpi-card border-left border-warning p-3 shadow-sm">
-          <h4 class="text-warning text-bold mb-1">{{ calib_due_30 }}</h4>
-          <p class="text-muted small mb-0">30 хоногт дуусах</p>
+        <div class="col-md-3">
+            <div class="card kpi-card bg-success text-white p-4 text-center shadow">
+                <h2 class="font-weight-bold">{{ active_devices }}</h2>
+                <p class="mb-0">Бэлэн (Ажиллаж буй)</p>
+            </div>
         </div>
-      </a>
-    </div>
-    <div class="col-md-3">
-      <a href="/django-admin/inventory/device/?verification=due_90" class="text-decoration-none">
-        <div class="card kpi-card border-left border-info p-3 shadow-sm">
-          <h4 class="text-info text-bold mb-1">{{ calib_due_90 }}</h4>
-          <p class="text-muted small mb-0">90 хоногт дуусах</p>
+        <div class="col-md-3">
+            <div class="card kpi-card bg-danger text-white p-4 text-center shadow">
+                <h2 class="font-weight-bold">{{ broken_devices }}</h2>
+                <p class="mb-0">Эвдрэлтэй / Засварт</p>
+            </div>
         </div>
-      </a>
-    </div>
-    <div class="col-md-3">
-      <a href="/django-admin/inventory/device/?verification=unknown" class="text-decoration-none">
-        <div class="card kpi-card border-left border-secondary p-3 shadow-sm">
-          <h4 class="text-secondary text-bold mb-1">{{ calib_unknown }}</h4>
-          <p class="text-muted small mb-0">Огноо бүрдээгүй</p>
+        <div class="col-md-3">
+            <div class="card kpi-card bg-warning text-dark p-4 text-center shadow">
+                <h2 class="font-weight-bold">{{ expired_count }}</h2>
+                <p class="mb-0">Ашиглалтын хугацаа дууссан</p>
+            </div>
         </div>
-      </a>
-    </div>
-  </div>
-
-  <div class="row">
-    <div class="col-md-4">
-      <div class="card p-4 shadow-sm h-100">
-        <h5 class="text-center">Багажнуудын ашиглалтын төлөв</h5>
-        <div class="chart-container">
-          <canvas id="statusChart"></canvas>
-        </div>
-      </div>
     </div>
 
-    <div class="col-md-4">
-      <div class="card p-4 shadow-sm h-100">
-        <h5 class="text-center">Эвдрэлтэй аймгууд (Top 10)</h5>
-        <div class="chart-container">
-          <canvas id="aimagChart"></canvas>
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <a href="/django-admin/inventory/device/?verification=expired" style="text-decoration:none;">
+                <div class="card kpi-card bg-danger text-white p-4 text-center shadow">
+                    <h2 class="font-weight-bold">{{ calib_expired }}</h2>
+                    <p class="mb-0">Калибровка дууссан</p>
+                </div>
+            </a>
         </div>
-      </div>
+        <div class="col-md-3">
+            <a href="/django-admin/inventory/device/?verification=due_30" style="text-decoration:none;">
+                <div class="card kpi-card bg-warning text-dark p-4 text-center shadow">
+                    <h2 class="font-weight-bold">{{ calib_due_30 }}</h2>
+                    <p class="mb-0">30 хоногт дуусах</p>
+                </div>
+            </a>
+        </div>
+        <div class="col-md-3">
+            <a href="/django-admin/inventory/device/?verification=due_90" style="text-decoration:none;">
+                <div class="card kpi-card bg-info text-white p-4 text-center shadow">
+                    <h2 class="font-weight-bold">{{ calib_due_90 }}</h2>
+                    <p class="mb-0">90 хоногт дуусах</p>
+                </div>
+            </a>
+        </div>
+        <div class="col-md-3">
+            <a href="/django-admin/inventory/device/?verification=unknown" style="text-decoration:none;">
+                <div class="card kpi-card bg-secondary text-white p-4 text-center shadow">
+                    <h2 class="font-weight-bold">{{ calib_unknown }}</h2>
+                    <p class="mb-0">Огноо бүрдээгүй</p>
+                </div>
+            </a>
+        </div>
     </div>
 
-    <div class="col-md-4">
-      <div class="card p-4 shadow-sm h-100">
-        <h5 class="text-center">Калибровка дуусах төлөв</h5>
-        <div class="chart-container">
-          <canvas id="calibrationChart"></canvas>
+    <div class="row">
+        <div class="col-md-4">
+            <div class="card p-4 shadow h-100">
+                <h5 class="text-center">Багажнуудын ашиглалтын төлөв</h5>
+                <div class="chart-container">
+                    <canvas id="statusChart"></canvas>
+                </div>
+            </div>
         </div>
-        <p class="small text-muted mt-3 text-center">График дээр дарж жагсаалтыг шүүнэ үү.</p>
-      </div>
+
+        <div class="col-md-4">
+            <div class="card p-4 shadow h-100">
+                <h5 class="text-center">Эвдрэлтэй аймгууд (Top 10)</h5>
+                <div class="chart-container">
+                    <canvas id="aimagChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card p-4 shadow h-100">
+                <h5 class="text-center">Калибровка дуусах төлөв</h5>
+                <div class="chart-container">
+                    <canvas id="calibrationChart"></canvas>
+                </div>
+                <p class="small text-muted mt-3 text-center">График дээр дарж жагсаалтыг шүүнэ үү.</p>
+            </div>
+        </div>
     </div>
-  </div>
 </div>
 
-{# ✅ JSON-г найдвартай дамжуулах (BEST) #}
-{{ status_stats_json|default_if_none:"[]"|json_script:"status-data" }}
-{{ aimag_stats_json|default_if_none:"[]"|json_script:"aimag-data" }}
-{{ calib_stats_json|default_if_none:"[]"|json_script:"calib-data" }}
-
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
-  function readJson(id) {
-    const el = document.getElementById(id);
-    if (!el) return [];
-    try {
-      const v = JSON.parse(el.textContent || "[]");
-      return Array.isArray(v) ? v : (v ? [v] : []);
-    } catch (e) {
-      console.warn("Bad JSON in", id, e);
-      return [];
-    }
-  }
+    // 1. Төлөвийн график (Doughnut)
+    const statusRawData = JSON.parse('{{ status_stats_json|safe }}');
+    const statusLabels = {
+        'Active': 'Ашиглагдаж буй',
+        'Broken': 'Эвдрэлтэй',
+        'Repair': 'Засварт байгаа',
+        'Spare': 'Нөөцөд байгаа',
+        'Retired': 'Ашиглалтаас гарсан'
+    };
 
-  const statusRawData = readJson("status-data");
-  const aimagData     = readJson("aimag-data");
-  const calibRawData  = readJson("calib-data");
-
-  const statusLabels = {
-    'Active': 'Ашиглагдаж буй',
-    'Broken': 'Эвдрэлтэй',
-    'Repair': 'Засварт байгаа',
-    'Spare': 'Нөөцөд байгаа',
-    'Retired': 'Ашиглалтаас гарсан'
-  };
-
-  function norm(s){ return String(s || "").toLowerCase(); }
-  const calibLabels = {
-    'expired': 'Хугацаа дууссан',
-    'due30': '30 хоногт дуусах',
-    'due_30': '30 хоногт дуусах',
-    'valid': 'Хэвийн',
-    'due_90': 'Хэвийн',
-    'due90': 'Хэвийн',
-  };
-
-  // 1) Төлөвийн график (Doughnut)
-  if (document.getElementById('statusChart') && statusRawData.length > 0) {
     new Chart(document.getElementById('statusChart'), {
-      type: 'doughnut',
-      data: {
-        labels: statusRawData.map(item => statusLabels[item.status] || item.status),
-        datasets: [{
-          data: statusRawData.map(item => item.count),
-          borderWidth: 2
-        }]
-      },
-      options: {
-        maintainAspectRatio: false,
-        plugins: { legend: { position: 'bottom' } }
-      }
-    });
-  }
-
-  // 2) Аймгуудын график (Bar)
-  if (document.getElementById('aimagChart') && aimagData.length > 0) {
-    new Chart(document.getElementById('aimagChart'), {
-      type: 'bar',
-      data: {
-        labels: aimagData.map(item => item.name),
-        datasets: [{
-          label: 'Багажны тоо',
-          data: aimagData.map(item => item.broken_count),
-          borderRadius: 5
-        }]
-      },
-      options: {
-        maintainAspectRatio: false,
-        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
-        plugins: { legend: { display: false } }
-      }
-    });
-  }
-
-  // 3) Калибровкын график (Doughnut)
-  if (document.getElementById('calibrationChart') && calibRawData.length > 0) {
-    new Chart(document.getElementById('calibrationChart'), {
-      type: 'doughnut',
-      data: {
-        labels: calibRawData.map(item => calibLabels[norm(item.status)] || item.status),
-        datasets: [{
-          data: calibRawData.map(item => item.count),
-          borderWidth: 2
-        }]
-      },
-      options: {
-        maintainAspectRatio: false,
-        plugins: { legend: { position: 'bottom' } },
-        onClick: (evt, item) => {
-          if (item.length > 0) {
-            const index = item[0].index;
-            const status = calibRawData[index]?.status;
-            const key = norm(status);
-            const urls = {
-              'expired': '/django-admin/inventory/device/?verification=expired',
-              'due_30': '/django-admin/inventory/device/?verification=due_30',
-              'due30': '/django-admin/inventory/device/?verification=due_30',
-              'valid': '/django-admin/inventory/device/?verification=valid',
-              'due_90': '/django-admin/inventory/device/?verification=due_90',
-              'due90': '/django-admin/inventory/device/?verification=due_90',
-            };
-            if (urls[key]) window.location.href = urls[key];
-          }
+        type: 'doughnut',
+        data: {
+            labels: statusRawData.map(item => statusLabels[item.status] || item.status),
+            datasets: [{
+                data: statusRawData.map(item => item.count),
+                backgroundColor: ['#28a745', '#dc3545', '#ffc107', '#17a2b8', '#6c757d'],
+                borderWidth: 2
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } }
         }
-      }
     });
-  }
+
+    // 2. Аймгуудын график (Bar)
+    const aimagData = JSON.parse('{{ aimag_stats_json|safe }}');
+    new Chart(document.getElementById('aimagChart'), {
+        type: 'bar',
+        data: {
+            labels: aimagData.map(item => item.name),
+            datasets: [{
+                label: 'Багажны тоо',
+                data: aimagData.map(item => item.broken_count),
+                backgroundColor: '#dc3545',
+                borderRadius: 5
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+            plugins: { legend: { display: false } }
+        }
+    });
+
+    // 3. Калибровкын график (Doughnut - Шинэ)
+    const calibRawData = JSON.parse('{{ calib_stats_json|safe }}');
+    const calibLabels = {
+        'Expired': 'Хугацаа дууссан',
+        'Due30': '30 хоногт дуусах',
+        'Valid': 'Хэвийн'
+    };
+
+    new Chart(document.getElementById('calibrationChart'), {
+        type: 'doughnut',
+        data: {
+            labels: calibRawData.map(item => calibLabels[item.status] || item.status),
+            datasets: [{
+                data: calibRawData.map(item => item.count),
+                backgroundColor: ['#dc3545', '#ffc107', '#28a745'],
+                borderWidth: 2
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } },
+            onClick: (evt, item) => {
+                if (item.length > 0) {
+                    const index = item[0].index;
+                    const status = calibRawData[index].status;
+                    const urls = {
+                        'Expired': '/django-admin/inventory/device/?verification=expired',
+                        'Due30': '/django-admin/inventory/device/?verification=due_30',
+                        'Valid': '/django-admin/inventory/device/?verification=valid'
+                    };
+                    if (urls[status]) window.location.href = urls[status];
+                }
+            }
+        }
+    });
 </script>
 {% endblock %}

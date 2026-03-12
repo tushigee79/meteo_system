@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Any, Dict
 import json
@@ -41,7 +41,7 @@ except Exception:
 
 class SumDuuregByAimagFilter(admin.SimpleListFilter):
     """Cascading Sum/Duureg filter: shows options only for selected Aimag."""
-    title = "Ð¡ÑƒÐ¼/Ð”Ò¯Ò¯Ñ€ÑÐ³"
+    title = "Сум/Дүүрэг"
     parameter_name = "sum_ref__id__exact"
 
     def lookups(self, request, model_admin):
@@ -67,26 +67,26 @@ class SumDuuregByAimagFilter(admin.SimpleListFilter):
 
 
 class LocationTypeFilter(admin.SimpleListFilter):
-    title = "Ð‘Ð°Ð¹Ñ€ÑˆÐ»Ñ‹Ð½ Ñ‚Ó©Ñ€Ó©Ð»"
+    title = "Байршлын төрөл"
     parameter_name = "location_type"  # DB field
 
     def lookups(self, request, model_admin):
-        # Location Ð´ÑÑÑ€ choices Ð±Ð°Ð¹Ð²Ð°Ð» Ñ‚ÑÑ€Ð¸Ð¹Ð³ Ð°ÑˆÐ¸Ð³Ð»Ð°Ð½Ð°
+        # Location дээр choices байвал тэрийг ашиглана
         choices = getattr(Location, "LOCATION_TYPE_CHOICES", None) or getattr(Location, "TYPE_CHOICES", None)
 
         if choices:
             return [(val, label) for (val, label) in choices]
 
-        # fallback (map Ð´ÑÑÑ€ Ð°ÑˆÐ¸Ð³Ð»Ð°Ð´Ð°Ð³ key-Ò¯Ò¯Ð´)
+        # fallback (map дээр ашигладаг key-үүд)
         return [
-            ("WEATHER", "Ð¦Ð°Ð³ ÑƒÑƒÑ€"),
+            ("WEATHER", "Цаг уур"),
             ("AWS", "AWS"),
-            ("RADAR", "Ð Ð°Ð´Ð°Ñ€"),
-            ("HYDRO", "Ð£Ñ ÑÑƒÐ´Ð»Ð°Ð»"),
-            ("AEROLOGY", "ÐÑÑ€Ð¾Ð»Ð¾Ð³Ð¸"),
-            ("AGRO", "Ð¥ÐÐ / Agro"),
-            ("ETALON", "Ð­Ñ‚Ð°Ð»Ð¾Ð½"),
-            ("OTHER", "Ð‘ÑƒÑÐ°Ð´"),
+            ("RADAR", "Радар"),
+            ("HYDRO", "Ус судлал"),
+            ("AEROLOGY", "Аэрологи"),
+            ("AGRO", "ХАА / Agro"),
+            ("ETALON", "Эталон"),
+            ("OTHER", "Бусад"),
         ]
 
     def queryset(self, request, queryset):
@@ -95,7 +95,7 @@ class LocationTypeFilter(admin.SimpleListFilter):
             return queryset
         return queryset.filter(location_type=v)
 # ============================================================
-# Scope helpers (Ð°Ð¹Ð¼Ð³Ð¸Ð¹Ð½ Ð¸Ð½Ð¶ÐµÐ½ÐµÑ€ Ð·Ó©Ð²Ñ…Ó©Ð½ Ó©Ó©Ñ€Ð¸Ð¹Ð½ Ð°Ð¹Ð¼Ð°Ð³)
+# Scope helpers (аймгийн инженер зөвхөн өөрийн аймаг)
 # ============================================================
 
 def _get_scope(request: HttpRequest) -> Dict[str, Any]:
@@ -211,7 +211,7 @@ class SparePartItemInline(admin.TabularInline):
 
 
 # ============================================================
-# âœ… Global filters (Aimag/UB, Sum/Duureg, Kind) for ALL modules
+# ✅ Global filters (Aimag/UB, Sum/Duureg, Kind) for ALL modules
 # - Works with URL params: ?aimag=<id>&sum=<id>&kind=<KIND>
 # - Compatible aliases: aimag_id, sum_id, location_type
 # ============================================================
@@ -311,7 +311,7 @@ class LocationAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
 
     change_list_template = "inventory/admin/location_changelist_with_map.html"
 
-    # âœ… Production list display (as you requested)
+    # ✅ Production list display (as you requested)
     list_display = (
         "name",
         "location_type",
@@ -374,7 +374,7 @@ class LocationAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
     # -------------------------
     # Columns
     # -------------------------
-    @admin.display(description="Ð‘Ð°Ð³Ð°Ð¶", ordering="device_count")
+    @admin.display(description="Багаж", ordering="device_count")
     def device_count_col(self, obj):
         return getattr(obj, "device_count", 0) or 0
 
@@ -389,10 +389,10 @@ class LocationAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
             pt,
         )
 
-    @admin.display(description="ðŸ—ºï¸ Ð¥Ð°Ñ€Ð°Ñ…")
+    @admin.display(description="🗺️ Харах")
     def view_map_col(self, obj):
         url = reverse("station_map_one") + f"?location_id={obj.id}"
-        return format_html('<a class="button" href="{}" target="_blank">Ð¥Ð°Ñ€Ð°Ñ…</a>', url)
+        return format_html('<a class="button" href="{}" target="_blank">Харах</a>', url)
 
     # -------------------------
     # Changelist map context
@@ -400,7 +400,7 @@ class LocationAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
 
-        # âœ… IMPORTANT: use filtered queryset from ChangeList, so kind/aimag/sum filters
+        # ✅ IMPORTANT: use filtered queryset from ChangeList, so kind/aimag/sum filters
         # affect the MAP too (this is the issue you were seeing).
         try:
             cl = self.get_changelist_instance(request)
@@ -409,7 +409,7 @@ class LocationAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
             qs = self.get_queryset(request)
 
         extra_context["locations_json"] = json.dumps(_build_locations_payload(qs), ensure_ascii=False)
-        extra_context["map_url"] = reverse("inventory:inventory_map")  # full map route (outside admin)
+        extra_context["map_url"] = reverse("inventory_map")  # full map route (outside admin)
 
         return super().changelist_view(request, extra_context=extra_context)
 
@@ -427,13 +427,13 @@ class LocationAdmin(GlobalAdminFilterMixin, admin.ModelAdmin):
     def map_view(self, request):
         # This is an admin wrapper page (if you use it). It can render your public /inventory/map/
         return TemplateResponse(request, "inventory/admin/location_map_embed.html", {
-            "title": "Ð“Ð°Ð·Ñ€Ñ‹Ð½ Ð·ÑƒÑ€Ð°Ð³",
-            "map_url": reverse("inventory:inventory_map"),
+            "title": "Газрын зураг",
+            "map_url": reverse("inventory_map"),
         })
 
     def map_one_view(self, request):
         return TemplateResponse(request, "inventory/admin/location_map_one_embed.html", {
-            "title": "Ð“Ð°Ð·Ñ€Ñ‹Ð½ Ð·ÑƒÑ€Ð°Ð³ (Ð½ÑÐ³)",
+            "title": "Газрын зураг (нэг)",
             "map_url": reverse("station_map_one"),
         })
 @admin.register(Device)
@@ -602,20 +602,20 @@ if AuditEvent is not None:
 
        
 # ============================================================
-# âœ… Custom AdminSite instance (meteo_config/urls.py Ò¯Ò¯Ð½ÑÑÑ Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚Ð»Ð¾Ð½Ð¾)
+# ✅ Custom AdminSite instance (meteo_config/urls.py үүнээс импортлоно)
 # ============================================================
 
 try:
     InventoryAdminSite  # noqa: F401 (exists?)
 except NameError:
-    # Ð¥ÑÑ€Ð²ÑÑ class Ð½ÑÑ€ Ñ‡Ð¸Ð½ÑŒ Ó©Ó©Ñ€ Ð±Ð¾Ð» (Ð¶: CustomAdminSite), Ð´Ð¾Ð¾Ñ€Ñ… Ð¼Ó©Ñ€Ð¸Ð¹Ð³ Ó©Ó©Ñ€Ñ‡Ð¸Ð»Ð½Ó©.
-    # Ð“ÑÑ…Ð´ÑÑ Ð¾Ð´Ð¾Ð¾Ñ…Ð¾Ð½Ð´Ð¾Ð¾ Ð°Ð»Ð´Ð°Ð° Ð³Ð°Ñ€Ð°Ñ…Ð³Ò¯Ð¹Ð³ÑÑÑ€ Ð±Ð¾ÑÐ³Ð¾Ñ…Ñ‹Ð½ Ñ‚ÑƒÐ»Ð´ fallback Ñ…Ð¸Ð¹Ð½Ñ.
+    # Хэрвээ class нэр чинь өөр бол (ж: CustomAdminSite), доорх мөрийг өөрчилнө.
+    # Гэхдээ одоохондоо алдаа гарахгүйгээр босгохын тулд fallback хийнэ.
     from django.contrib.admin import AdminSite
 
     class InventoryAdminSite(AdminSite):
-        site_header = "Ð‘Ò®Ð Ð¢Ð“Ð­Ð› - ÐÐ´Ð¼Ð¸Ð½"
-        site_title = "Ð‘Ò®Ð Ð¢Ð“Ð­Ð›"
-        index_title = "Ð£Ð´Ð¸Ñ€Ð´Ð»Ð°Ð³Ð°"
+        site_header = "БҮРТГЭЛ - Админ"
+        site_title = "БҮРТГЭЛ"
+        index_title = "Удирдлага"
 
-# âœ… Ð­Ð½Ñ Ð¾Ð±ÑŠÐµÐºÑ‚ Ð·Ð°Ð°Ð²Ð°Ð» Ð±Ð°Ð¹Ñ… Ñ‘ÑÑ‚Ð¾Ð¹
+# ✅ Энэ объект заавал байх ёстой
 inventory_admin_site = InventoryAdminSite(name="inventory_admin")

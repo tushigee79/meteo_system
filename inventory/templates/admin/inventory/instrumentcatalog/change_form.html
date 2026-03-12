@@ -1,23 +1,24 @@
-{# templates/admin/inventory/device/change_form.html #}
+﻿{# inventory/templates/admin/inventory/device/change_form.html #}
 {% extends "admin/change_form.html" %}
-{% load static admin_urls %}
+{% load static i18n admin_urls %}
 
 {% block extrahead %}
   {{ block.super }}
   <script>
-    // ✅ ABSOLUTE URL-ууд (reverse) — relative биш!
-    window.__deviceSumsUrl = "{% url 'inventory_admin:device_sums_by_aimag' %}";
-    window.__deviceLocUrl  = "{% url 'inventory_admin:device_location_options' %}";
-    window.__catalogByKindUrl = "{% url 'inventory_admin:device_catalog_by_kind' %}";
+    // Location cascade is handled via DeviceAdmin.location_options_view
+    window.__deviceLocUrl = "{% url 'admin:inventory_device_device_location_options' %}";
   </script>
 {% endblock %}
 
-{% block extrahead %}
-{{ block.super }}
-<script>
-  // ✅ JS-үүд энэ URL-уудыг ашиглана (hardcode хийхгүй)
-  window.__deviceCatalogUrl = "{{ device_catalog_by_kind_url }}";
-  window.__deviceSumsUrl = "{{ device_sums_by_aimag_url }}";
-  window.__deviceLocUrl = "{{ device_location_options_url }}";
-</script>
+{% block object-tools-items %}
+  {{ block.super }}
+  {% if original and original.pk %}
+    <li>
+      <a class="historylink"
+         href="{% url 'inventory_admin:inventory_device_passport' original.pk %}">
+        Device Passport PDF
+      </a>
+    </li>
+  {% endif %}
 {% endblock %}
+

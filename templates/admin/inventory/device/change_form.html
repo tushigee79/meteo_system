@@ -1,12 +1,12 @@
-{# inventory/templates/admin/inventory/device/change_form.html #}
 {% extends "admin/change_form.html" %}
 {% load static i18n admin_urls %}
 
 {% block extrahead %}
   {{ block.super }}
   <script>
-window.__deviceSumsUrl = "{% url 'admin:reports-sums-by-aimag' %}";
-window.__deviceLocUrl  = "{% url 'admin:inventory_device_device_location_options' %}";
+    window.__deviceSumsUrl = "{% url 'inventory:ajax_load_sums' %}";
+    window.__deviceLocUrl  = "{% url 'inventory_admin:inventory_device_device_location_options' %}";
+    window.__deviceCatalogUrl = "{% url 'inventory_admin:inventory_device_device_catalog_by_kind' %}";
   </script>
 {% endblock %}
 

@@ -1,0 +1,25 @@
+{# inventory/templates/admin/inventory/device/change_form.html #}
+{% extends "admin/change_form.html" %}
+{% load static i18n admin_urls %}
+
+{% block extrahead %}
+  {{ block.super }}
+  <script>
+    // Injects the correct admin-namespaced URLs
+    window.__deviceSumsUrl = "{% url 'admin:device_load_sums' %}";
+    window.__deviceLocUrl  = "{% url 'admin:device_location_options' %}";
+
+    console.log("TEMPLATE injected URLs:", window.__deviceSumsUrl, window.__deviceLocUrl);
+  </script>
+{% endblock %}
+
+{% block object-tools-items %}
+  {{ block.super }}
+  {% if original and original.pk %}
+    <li>
+      <a class="historylink" href="{% url 'admin:inventory_device_passport' original.pk %}">
+        Device Passport PDF
+      </a>
+    </li>
+  {% endif %}
+{% endblock %}

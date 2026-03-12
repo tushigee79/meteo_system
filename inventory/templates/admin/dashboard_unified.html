@@ -1,298 +1,877 @@
 {% extends "admin/base_site.html" %}
 {% load static %}
 
-{% block title %}{{ title }}{% endblock %}
+{% block title %}{{ title|default:"Ерөнхий мэдээлэл" }}{% endblock %}
 
 {% block extrastyle %}
 {{ block.super }}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
-  :root{
-    --primary:#2563eb; --success:#10b981; --warning:#f59e0b;
-    --danger:#ef4444; --gray:#64748b; --bg-light:#f8fafc;
-  }
-  body{ background-color: var(--bg-light); }
-  .wrap{ padding:20px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
-
-  .topbar{
-    display:flex; justify-content:space-between; align-items:center;
-    margin-bottom:24px; background:#fff; padding:16px 24px;
-    border-radius:16px; box-shadow:0 1px 3px rgba(0,0,0,0.1);
-  }
-  .filter-group{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-  input[type="date"]{ padding:8px 12px; border:1px solid #e2e8f0; border-radius:8px; outline:none; }
-
-  .btn-primary{ background:var(--primary); color:#fff !important; border:none; }
-  .btn-outline{ background:#fff; color:var(--gray); border:1px solid #e2e8f0; text-decoration:none; }
-  .btn-common{
-    padding:8px 16px; border-radius:8px; font-weight:600; cursor:pointer;
-    transition:.2s; display:inline-flex; align-items:center; gap:6px;
+  .section-card,
+  .card {
+    border-radius: 14px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.06);
   }
 
-  .cards{ display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:20px; margin-bottom:24px; }
-  .card{
-    background:#fff; padding:20px; border-radius:16px;
-    box-shadow:0 4px 6px -1px rgba(0,0,0,0.1); border:1px solid rgba(0,0,0,0.05);
+  .kpi-card .small-box {
+    border-radius: 12px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.08);
+    overflow: hidden;
+    color: #fff;
   }
-  .card .k{ font-size:14px; color:var(--gray); font-weight:600; display:flex; align-items:center; gap:8px; }
-  .card .v{ font-size:28px; font-weight:800; margin-top:8px; }
 
-  .status-border-success{ border-left:4px solid var(--success); }
-  .status-border-warning{ border-left:4px solid var(--warning); }
-  .status-border-danger{ border-left:4px solid var(--danger); }
+  .kpi-card .small-box .inner {
+    padding: 16px 18px;
+  }
 
-  .grid-main{ display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap:24px; margin-bottom:24px; }
-  .chart-container{
-    background:#fff; padding:20px; border-radius:16px;
-    box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);
-    border:1px solid rgba(0,0,0,0.05);
+  .bg-purple {
+    background: #6f42c1 !important;
+    color: #fff !important;
   }
-  .chart-title{ font-size:16px; font-weight:800; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
-  .chart{ height:320px; }
-  #map{ height:480px; border-radius:12px; overflow:hidden; }
 
-  .badge-danger{
-    background:var(--danger); color:#fff; padding:2px 8px; border-radius:999px;
-    font-size:12px; font-weight:800; margin-left:8px;
+  .system-score {
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1.1;
   }
-  .pulse-danger{ position:relative; border:1px solid rgba(239,68,68,0.35); }
-  .pulse-danger::after{
-    content:""; position:absolute; left:18px; top:18px; width:10px; height:10px;
-    border-radius:50%; background:var(--danger); opacity:.85; animation:pulseRing 1.6s infinite;
+
+  #station_map {
+    min-height: 560px;
+    border-radius: 12px;
   }
-  @keyframes pulseRing{
-    0%{ transform:scale(.9); opacity:.75; }
-    70%{ transform:scale(3.2); opacity:0; }
-    100%{ transform:scale(3.2); opacity:0; }
+
+  .table td,
+  .table th {
+    vertical-align: middle;
+  }
+
+  .badge {
+    font-size: 0.8rem;
+  }
+
+  .mini-note {
+    color: #6c757d;
+    font-size: 0.9rem;
+  }
+
+  .small-box-footer {
+    display: block;
+    color: rgba(255,255,255,.95) !important;
+    padding: 8px 12px;
+    text-decoration: none;
+    background: rgba(0,0,0,.12);
+  }
+
+  .small-box-footer:hover {
+    background: rgba(0,0,0,.18);
+    color: #fff !important;
+  }
+
+  .btn-xs {
+    padding: .15rem .45rem;
+    font-size: .75rem;
+    line-height: 1.4;
+    border-radius: .2rem;
   }
 </style>
-
-<!-- ✅ LOCAL Leaflet -->
-<link rel="stylesheet" href="{% static 'inventory/vendor/leaflet/leaflet.css' %}">
-<script src="{% static 'inventory/vendor/leaflet/leaflet.js' %}"></script>
-
-<!-- ✅ LOCAL ECharts -->
-<script src="{% static 'inventory/vendor/echarts/echarts.min.js' %}"></script>
 {% endblock %}
 
 {% block content %}
-<div class="wrap">
-  <div class="topbar">
-    <div>
-      <div style="font-size:18px;font-weight:900;">{{ title }}</div>
-      <div style="color:var(--gray);font-size:13px;">KPI + Workflow + Map + Verification</div>
-    </div>
+<div class="content">
+  <div class="container-fluid">
 
-    <form method="get" class="filter-group">
-      <input type="date" name="date_from" value="{{ date_from|date:'Y-m-d' }}">
-      <input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}">
-      <button class="btn-common btn-primary" type="submit">Шүүх</button>
-      <a class="btn-common btn-outline" href="">Reset</a>
-    </form>
-  </div>
-
-  <div class="cards">
-    <div class="card status-border-success"><div class="k">📍 Байршил</div><div class="v">{{ total_locations }}</div></div>
-    <div class="card status-border-success"><div class="k">🧰 Нийт багаж</div><div class="v">{{ total_devices }}</div></div>
-
-    <div class="card status-border-danger {% if expired_count|default:0|add:0 > 0 %}pulse-danger{% endif %}">
-      <div class="k">⛔ Калибровка хэтэрсэн
-        {% if expired_count|default:0|add:0 > 0 %}<span class="badge-danger">ALERT</span>{% endif %}
+    <!-- =========================
+         Filter header
+    ========================= -->
+    <div class="card section-card mb-3">
+      <div class="card-body">
+        <form method="get" class="form-inline">
+          <label class="mr-2"><strong>Огноо:</strong></label>
+          <input type="date" name="date_from" value="{{ date_from|date:'Y-m-d' }}" class="form-control mr-2">
+          <input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}" class="form-control mr-2">
+          <button type="submit" class="btn btn-primary">Шүүх</button>
+        </form>
       </div>
-      <div class="v">{{ expired_count|default:0 }}</div>
     </div>
 
-    <div class="card status-border-warning"><div class="k">⏳ Хүлээгдэж буй</div><div class="v">{{ pending_total_items }}</div></div>
-    <div class="card status-border-danger"><div class="k">🧯 Эвдрэлтэй</div><div class="v">{{ broken_locations }}</div></div>
-  </div>
+    <!-- =========================
+         KPI
+    ========================= -->
+    <div class="row kpi-card">
+      <div class="col-md-2">
+        <div class="small-box bg-info">
+          <div class="inner">
+            <h3>{{ total_locations|default:0 }}</h3>
+            <p>Станц</p>
+          </div>
+        </div>
+      </div>
 
-  <div class="grid-main">
-    <div class="chart-container">
-      <div class="chart-title">Багажийн төлөв</div>
-      <div id="chartStatus" class="chart"></div>
+      <div class="col-md-2">
+        <div class="small-box bg-primary">
+          <div class="inner">
+            <h3>{{ total_devices|default:0 }}</h3>
+            <p>Багаж</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-2">
+        <div class="small-box bg-success">
+          <div class="inner">
+            <h3>{{ stations_with_device|default:0 }}</h3>
+            <p>Багажтай станц</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-2">
+        <div class="small-box bg-warning">
+          <div class="inner">
+            <h3>{{ stations_no_device|default:0 }}</h3>
+            <p>Багажгүй станц</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-2">
+        <div class="small-box bg-danger">
+          <div class="inner">
+            <h3>{{ expired_count|default:0 }}</h3>
+            <p>Expired verification</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-2">
+        <div class="small-box bg-purple">
+          <div class="inner">
+            <h3>{{ pending_total_items|default:0 }}</h3>
+            <p>Pending workflow</p>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <div class="chart-container">
-      <div class="chart-title">Ажлын урсгал</div>
-      <div id="chartWorkflow" class="chart"></div>
+    <!-- =========================
+         Top charts
+    ========================= -->
+    <div class="row">
+      <div class="col-md-6">
+        <div class="card section-card">
+          <div class="card-header">
+            <h3 class="card-title">Verification Radar</h3>
+          </div>
+          <div class="card-body">
+            <div id="verification_chart" style="height:350px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <div class="card section-card">
+          <div class="card-header">
+            <h3 class="card-title">Device Status</h3>
+          </div>
+          <div class="card-body">
+            <div id="status_chart" style="height:350px;"></div>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <div class="chart-container">
-      <div class="chart-title">Калибровка дуусах төлөв</div>
-      <div id="verifPie" class="chart"></div>
-      <div style="font-size:12px;color:var(--gray);margin-top:6px;">Slice дарвал багажийн жагсаалт filter-лэгдэж нээгдэнэ.</div>
+    <!-- =========================
+         National Map
+    ========================= -->
+    <div class="card section-card">
+      <div class="card-header">
+        <h3 class="card-title">National Station Map</h3>
+      </div>
+      <div class="card-body">
+        <div id="station_map"></div>
+      </div>
     </div>
-  </div>
 
-  <div class="chart-container">
-    <div class="chart-title">🗺️ Интерактив газрын зураг</div>
-    <div id="map"></div>
-  </div>
+    <!-- =========================
+         Data Quality
+    ========================= -->
+    <div class="row">
+      <div class="col-md-4">
+        <div class="card section-card">
+          <div class="card-header">
+            <h3 class="card-title">Data Quality</h3>
+          </div>
+          <div class="card-body">
+            <ul class="mb-0">
+              <li>Серийн дугааргүй багаж: {{ devices_no_serial|default:0 }}</li>
+              <li>Байршилгүй багаж: {{ devices_no_location|default:0 }}</li>
+              <li>Verification огноогүй: {{ devices_no_verif|default:0 }}</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
 
-  <div class="chart-container" style="margin-top:24px;">
-    <div class="chart-title">📈 Калибровкийн трэнд (90 хоног)</div>
-    <div id="verifTrendChart" style="height: 300px;"></div>
+    <!-- =========================
+         Special Systems Monitoring
+    ========================= -->
+    <div class="card section-card">
+      <div class="card-header">
+        <h3 class="card-title">Special Systems Monitoring</h3>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          {% for s in systems_summary %}
+          <div class="col-md-4">
+            <div class="card card-outline card-primary h-100">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <h3 class="card-title mb-0"><strong>{{ s.label }}</strong></h3>
+                <div>
+                  <a href="{{ s.reports_url }}" class="btn btn-sm btn-primary">Report</a>
+                  <a href="{{ s.map_url }}" class="btn btn-sm btn-outline-secondary">Map</a>
+                </div>
+              </div>
+
+              <div class="card-body">
+                <div class="mb-3 text-center">
+                  <div class="system-score"
+                       style="color:{% if s.completeness_index >= 85 %}#28a745{% elif s.completeness_index >= 60 %}#ffc107{% else %}#dc3545{% endif %};">
+                    {{ s.completeness_index|default:0 }} / 100
+                  </div>
+                  <small>System Completeness Index</small>
+                </div>
+
+                <a href="{{ s.reports_url }}" style="text-decoration:none; color:inherit;">
+                  <div class="row text-center mb-3">
+                    <div class="col-4">
+                      <h4>{{ s.total_sites|default:0 }}</h4>
+                      <small>Sites</small>
+                    </div>
+                    <div class="col-4">
+                      <h4>{{ s.total_devices|default:0 }}</h4>
+                      <small>Devices</small>
+                    </div>
+                    <div class="col-4">
+                      <h4>{{ s.operational_sites|default:0 }}</h4>
+                      <small>Operational</small>
+                    </div>
+                  </div>
+
+                  <table class="table table-sm table-bordered">
+                    <tbody>
+                      <tr><th>Broken sites</th><td>{{ s.broken_sites|default:0 }}</td></tr>
+                      <tr><th>Empty sites</th><td>{{ s.empty_sites|default:0 }}</td></tr>
+                      <tr><th>Broken devices</th><td>{{ s.broken_devices|default:0 }}</td></tr>
+                      <tr><th>Expired verification</th><td>{{ s.verif_expired|default:0 }}</td></tr>
+                      <tr><th>Missing verification</th><td>{{ s.verif_missing|default:0 }}</td></tr>
+                      <tr><th>Missing QR</th><td>{{ s.qr_missing|default:0 }}</td></tr>
+                      <tr><th>Missing serial</th><td>{{ s.serial_missing|default:0 }}</td></tr>
+                    </tbody>
+                  </table>
+
+                  <table class="table table-sm table-striped">
+                    <tbody>
+                      <tr><th>Metadata</th><td>{{ s.metadata_score|default:0 }}/25</td></tr>
+                      <tr><th>QR coverage</th><td>{{ s.qr_score|default:0 }}/15</td></tr>
+                      <tr><th>Passport readiness</th><td>{{ s.passport_score|default:0 }}/15</td></tr>
+                      <tr><th>Verification health</th><td>{{ s.verif_score|default:0 }}/25</td></tr>
+                      <tr><th>Operational health</th><td>{{ s.ops_score|default:0 }}/20</td></tr>
+                    </tbody>
+                  </table>
+                </a>
+
+                <div class="mt-3">
+                  <a href="{{ s.reports_url }}&verification_bucket=expired" class="btn btn-xs btn-danger">Expired</a>
+                  <a href="{{ s.reports_url }}&qr_missing=1" class="btn btn-xs btn-warning">Missing QR</a>
+                  <a href="{{ s.reports_url }}&status=Broken" class="btn btn-xs btn-secondary">Broken</a>
+                </div>
+
+                <div id="system_chart_{{ forloop.counter }}" style="height:260px;"></div>
+              </div>
+            </div>
+          </div>
+          {% empty %}
+          <div class="col-12">
+            <div class="alert alert-light border">Special systems data алга.</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <!-- =========================
+         High-risk alerts
+    ========================= -->
+    <div class="row">
+      {% for r in risk_matrix %}
+        {% if r.risk_level == "HIGH" %}
+        <div class="col-md-4">
+          <div class="alert alert-danger">
+            <h5 class="mb-1">{{ r.label }} — HIGH RISK</h5>
+            <div>Completeness: {{ r.score|default:0 }}/100</div>
+            <div>Expired: {{ r.verif_expired|default:0 }}</div>
+            <div>Missing QR: {{ r.qr_missing|default:0 }}</div>
+            <div>Broken: {{ r.broken_devices|default:0 }}</div>
+            <a href="{{ r.reports_url }}" class="btn btn-sm btn-light mt-2">Нээх</a>
+          </div>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    <!-- =========================
+         System Risk Matrix
+    ========================= -->
+    <div class="card section-card">
+      <div class="card-header">
+        <h3 class="card-title">System Risk Matrix</h3>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-bordered table-hover">
+            <thead>
+              <tr>
+                <th>System</th>
+                <th>Completeness Index</th>
+                <th>Risk</th>
+                <th>Expired Verification</th>
+                <th>Missing QR</th>
+                <th>Broken Devices</th>
+                <th>Missing Serial</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in risk_matrix %}
+              <tr class="table-{{ r.risk_color }}">
+                <td><strong>{{ r.label }}</strong></td>
+                <td>{{ r.score|default:0 }}/100</td>
+                <td><span class="badge badge-{{ r.risk_color }}">{{ r.risk_level }}</span></td>
+                <td><a href="{{ r.expired_url }}">{{ r.verif_expired|default:0 }}</a></td>
+                <td><a href="{{ r.missing_qr_url }}">{{ r.qr_missing|default:0 }}</a></td>
+                <td><a href="{{ r.broken_url }}">{{ r.broken_devices|default:0 }}</a></td>
+                <td><a href="{{ r.missing_serial_url }}">{{ r.serial_missing|default:0 }}</a></td>
+                <td>
+                  <a href="{{ r.reports_url }}" class="btn btn-sm btn-primary">Report</a>
+                  <a href="{{ r.map_url }}" class="btn btn-sm btn-outline-secondary">Map</a>
+                </td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="8" class="text-center mini-note">Risk matrix data алга.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div id="risk_matrix_chart" style="height:360px;"></div>
+      </div>
+    </div>
+
+    <!-- =========================
+         Lifecycle & Maintenance Command Center
+    ========================= -->
+    <div class="card section-card">
+      <div class="card-header">
+        <h3 class="card-title">Lifecycle &amp; Maintenance Command Center</h3>
+      </div>
+      <div class="card-body">
+
+        <div class="row">
+          <div class="col-md-3">
+            <div class="small-box bg-danger">
+              <div class="inner">
+                <h3>{{ maintenance_overdue_count|default:0 }}</h3>
+                <p>Maintenance overdue</p>
+              </div>
+              <a href="{{ lifecycle_links.maintenance_overdue_url }}" class="small-box-footer">
+                Нээх <i class="fas fa-arrow-circle-right"></i>
+              </a>
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="small-box bg-warning">
+              <div class="inner">
+                <h3>{{ control_overdue_count|default:0 }}</h3>
+                <p>Control overdue</p>
+              </div>
+              <a href="{{ lifecycle_links.control_overdue_url }}" class="small-box-footer">
+                Нээх <i class="fas fa-arrow-circle-right"></i>
+              </a>
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="small-box bg-secondary">
+              <div class="inner">
+                <h3>{{ decommission_count|default:0 }}</h3>
+                <p>Decommission candidates</p>
+              </div>
+              <a href="{{ lifecycle_links.decommission_url }}" class="small-box-footer">
+                Нээх <i class="fas fa-arrow-circle-right"></i>
+              </a>
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="small-box bg-info">
+              <div class="inner">
+                <h3>{{ qr_missing_count|default:0 }}</h3>
+                <p>Missing QR</p>
+              </div>
+              <a href="{{ lifecycle_links.qr_missing_url }}" class="small-box-footer">
+                Нээх <i class="fas fa-arrow-circle-right"></i>
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+
+          <div class="col-md-6">
+            <div class="card card-outline card-primary">
+              <div class="card-header">
+                <h3 class="card-title">Service Freshness</h3>
+              </div>
+              <div class="card-body">
+                <table class="table table-sm table-bordered">
+                  <tbody>
+                    <tr><th>Fresh maintenance</th><td>{{ fresh_maintenance|default:0 }}</td></tr>
+                    <tr><th>Stale maintenance</th><td>{{ stale_maintenance|default:0 }}</td></tr>
+                    <tr><th>Fresh control</th><td>{{ fresh_control|default:0 }}</td></tr>
+                    <tr><th>Stale control</th><td>{{ stale_control|default:0 }}</td></tr>
+                    <tr><th>QR ready</th><td>{{ qr_ready_count|default:0 }}</td></tr>
+                    <tr><th>Passport ready</th><td>{{ passport_ready_count|default:0 }}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-6">
+            <div class="card card-outline card-success">
+              <div class="card-header">
+                <h3 class="card-title">Movement &amp; Activity</h3>
+              </div>
+              <div class="card-body">
+                <table class="table table-sm table-bordered">
+                  <tbody>
+                    <tr><th>Total movements</th><td>{{ movement_count|default:0 }}</td></tr>
+                    <tr><th>Recent movements (30d)</th><td>{{ recent_movement_count|default:0 }}</td></tr>
+                    <tr><th>Maintenance overdue</th><td>{{ maintenance_overdue_count|default:0 }}</td></tr>
+                    <tr><th>Control overdue</th><td>{{ control_overdue_count|default:0 }}</td></tr>
+                  </tbody>
+                </table>
+                <div id="service_activity_chart" style="height:280px;"></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- =========================
+         National Compliance & Readiness Index
+    ========================= -->
+    <div class="card section-card">
+      <div class="card-header">
+        <h3 class="card-title">National Compliance &amp; Readiness Index</h3>
+      </div>
+      <div class="card-body">
+
+        <div class="row mb-4">
+          <div class="col-md-4">
+            <div class="card card-outline card-primary">
+              <div class="card-header">
+                <h3 class="card-title">National Readiness</h3>
+              </div>
+              <div class="card-body text-center">
+                <div style="font-size:2.4rem;font-weight:700;color:{% if national_readiness.score >= 85 %}#28a745{% elif national_readiness.score >= 60 %}#ffc107{% else %}#dc3545{% endif %};">
+                  {{ national_readiness.score|default:0 }}/100
+                </div>
+                <div class="mb-3">
+                  <span class="badge badge-{{ national_readiness.color }}">{{ national_readiness.risk }}</span>
+                </div>
+
+                <table class="table table-sm table-bordered">
+                  <tbody>
+                    <tr><th>Metadata</th><td>{{ national_readiness.metadata_score|default:0 }}/25</td></tr>
+                    <tr><th>QR</th><td>{{ national_readiness.qr_score|default:0 }}/15</td></tr>
+                    <tr><th>Passport</th><td>{{ national_readiness.passport_score|default:0 }}/15</td></tr>
+                    <tr><th>Verification</th><td>{{ national_readiness.verif_score|default:0 }}/25</td></tr>
+                    <tr><th>Operational</th><td>{{ national_readiness.ops_score|default:0 }}/20</td></tr>
+                  </tbody>
+                </table>
+
+                <div id="national_readiness_chart" style="height:280px;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-8">
+            <div class="card card-outline card-success">
+              <div class="card-header">
+                <h3 class="card-title">Aimag Readiness Ranking</h3>
+              </div>
+              <div class="card-body">
+                <div id="aimag_readiness_chart" style="height:320px;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card card-outline card-info">
+          <div class="card-header">
+            <h3 class="card-title">Organization Readiness Ranking</h3>
+          </div>
+          <div class="card-body">
+            <div id="org_readiness_chart" style="height:340px;"></div>
+          </div>
+        </div>
+
+        <div class="table-responsive mt-3">
+          <table class="table table-bordered table-hover">
+            <thead>
+              <tr>
+                <th>Aimag</th>
+                <th>Score</th>
+                <th>Risk</th>
+                <th>Devices</th>
+                <th>Stations</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for a in aimag_readiness %}
+              <tr class="table-{{ a.color }}">
+                <td><strong>{{ a.label }}</strong></td>
+                <td>{{ a.score|default:0 }}/100</td>
+                <td><span class="badge badge-{{ a.color }}">{{ a.risk }}</span></td>
+                <td>{{ a.total_devices|default:0 }}</td>
+                <td>{{ a.total_locations|default:0 }}</td>
+                <td>
+                  <a href="{{ a.reports_url }}" class="btn btn-sm btn-primary">Report</a>
+                  <a href="{{ a.map_url }}" class="btn btn-sm btn-outline-secondary">Map</a>
+                </td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="6" class="text-center mini-note">Aimag readiness data алга.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </div>
+
   </div>
 </div>
+{% endblock %}
 
-{{ echarts_status_json|json_script:"status-data" }}
-{{ echarts_workflow_json|json_script:"workflow-data" }}
-{{ locations_json|json_script:"points-data" }}
-{{ verif_buckets_json|json_script:"verif-buckets-data" }}
+{% block extrahead %}
+{{ block.super }}
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+{% endblock %}
+
+{% block extrajs %}
+{{ block.super }}
+<script>
+(function () {
+  if (typeof echarts === "undefined") return;
+
+  // Base payloads
+  const verifBuckets = {{ verif_buckets_json|default:"{}"|safe }};
+  const statusData = {{ echarts_status_json|default:"[]"|safe }};
+  const systems = {{ systems_summary_json|default:"[]"|safe }};
+  const riskData = {{ risk_matrix_json|default:"[]"|safe }};
+  const activity = {{ service_activity_json|default:"{}"|safe }};
+  const national = {{ national_readiness_json|default:"{}"|safe }};
+  const aimags = {{ aimag_readiness_json|default:"[]"|safe }};
+  const orgs = {{ org_readiness_json|default:"[]"|safe }};
+
+  // Verification chart
+  const verificationEl = document.getElementById("verification_chart");
+  if (verificationEl) {
+    const vChart = echarts.init(verificationEl);
+    vChart.setOption({
+      title: { text: "Verification Radar", left: "center", textStyle: { fontSize: 14 } },
+      tooltip: { trigger: "item" },
+      legend: { bottom: 0 },
+      series: [{
+        type: "pie",
+        radius: ["40%", "70%"],
+        data: [
+          { name: "Expired", value: verifBuckets.expired || 0 },
+          { name: "Due 30", value: verifBuckets.due30 || 0 },
+          { name: "Due 90", value: verifBuckets.due90 || 0 }
+        ]
+      }]
+    });
+    window.addEventListener("resize", function () { try { vChart.resize(); } catch(e) {} });
+  }
+
+  // Status chart
+  const statusEl = document.getElementById("status_chart");
+  if (statusEl) {
+    const sChart = echarts.init(statusEl);
+    sChart.setOption({
+      title: { text: "Device Status", left: "center", textStyle: { fontSize: 14 } },
+      tooltip: { trigger: "item" },
+      legend: { bottom: 0 },
+      series: [{
+        type: "pie",
+        radius: ["40%", "70%"],
+        data: statusData || []
+      }]
+    });
+    sChart.on("click", function (params) {
+      if (params.data && params.data.url) {
+        window.location.href = params.data.url;
+      }
+    });
+    window.addEventListener("resize", function () { try { sChart.resize(); } catch(e) {} });
+  }
+
+  // System charts
+  systems.forEach(function (s, idx) {
+    const el = document.getElementById("system_chart_" + (idx + 1));
+    if (!el) return;
+
+    const chart = echarts.init(el);
+    chart.setOption({
+      series: [{
+        type: "gauge",
+        startAngle: 200,
+        endAngle: -20,
+        min: 0,
+        max: 100,
+        progress: { show: true, width: 18 },
+        axisLine: { lineStyle: { width: 18 } },
+        detail: {
+          valueAnimation: true,
+          formatter: "{value}",
+          fontSize: 20
+        },
+        data: [{ value: s.completeness_index || 0, name: s.label || "" }]
+      }]
+    });
+
+    chart.on("click", function () {
+      if (s.reports_url) window.location.href = s.reports_url;
+    });
+
+    window.addEventListener("resize", function () {
+      try { chart.resize(); } catch (e) {}
+    });
+  });
+
+  // Risk matrix chart
+  const riskEl = document.getElementById("risk_matrix_chart");
+  if (riskEl && Array.isArray(riskData) && riskData.length) {
+    const rChart = echarts.init(riskEl);
+    rChart.setOption({
+      title: { text: "Risk Overview", left: "center", textStyle: { fontSize: 14 } },
+      tooltip: { trigger: "axis" },
+      grid: { left: 40, right: 20, top: 60, bottom: 40 },
+      xAxis: {
+        type: "category",
+        data: riskData.map(x => x.label)
+      },
+      yAxis: {
+        type: "value",
+        max: 100
+      },
+      series: [{
+        name: "Completeness",
+        type: "bar",
+        data: riskData.map(x => x.score)
+      }]
+    });
+
+    rChart.on("click", function (params) {
+      const row = riskData[params.dataIndex];
+      if (row && row.reports_url) window.location.href = row.reports_url;
+    });
+
+    window.addEventListener("resize", function () {
+      try { rChart.resize(); } catch (e) {}
+    });
+  }
+
+  // Service activity chart
+  const actEl = document.getElementById("service_activity_chart");
+  if (actEl) {
+    const actChart = echarts.init(actEl);
+    actChart.setOption({
+      title: {
+        text: "Service Activity (30 days)",
+        left: "center",
+        textStyle: { fontSize: 14 }
+      },
+      tooltip: { trigger: "axis" },
+      legend: { top: 25 },
+      grid: { left: 40, right: 20, top: 70, bottom: 40 },
+      xAxis: {
+        type: "category",
+        data: activity.axis || []
+      },
+      yAxis: {
+        type: "value"
+      },
+      series: [
+        {
+          name: "Maintenance",
+          type: "line",
+          smooth: true,
+          data: activity.maintenance || []
+        },
+        {
+          name: "Control",
+          type: "line",
+          smooth: true,
+          data: activity.control || []
+        }
+      ]
+    });
+
+    window.addEventListener("resize", function () {
+      try { actChart.resize(); } catch (e) {}
+    });
+  }
+
+  // National readiness gauge
+  const nEl = document.getElementById("national_readiness_chart");
+  if (nEl) {
+    const nChart = echarts.init(nEl);
+    nChart.setOption({
+      series: [{
+        type: "gauge",
+        startAngle: 200,
+        endAngle: -20,
+        min: 0,
+        max: 100,
+        progress: { show: true, width: 18 },
+        axisLine: { lineStyle: { width: 18 } },
+        detail: {
+          valueAnimation: true,
+          formatter: "{value}",
+          fontSize: 22
+        },
+        data: [{ value: national.score || 0, name: "National" }]
+      }]
+    });
+    window.addEventListener("resize", function () {
+      try { nChart.resize(); } catch (e) {}
+    });
+  }
+
+  // Aimag readiness ranking
+  const aEl = document.getElementById("aimag_readiness_chart");
+  if (aEl && Array.isArray(aimags) && aimags.length) {
+    const sortedAimags = [...aimags].sort((a, b) => (b.score || 0) - (a.score || 0));
+    const aChart = echarts.init(aEl);
+
+    aChart.setOption({
+      title: {
+        text: "Aimag Readiness Ranking",
+        left: "center",
+        textStyle: { fontSize: 14 }
+      },
+      tooltip: { trigger: "axis" },
+      grid: { left: 140, right: 20, top: 60, bottom: 30 },
+      xAxis: { type: "value", max: 100 },
+      yAxis: { type: "category", data: sortedAimags.map(x => x.label) },
+      series: [{ type: "bar", data: sortedAimags.map(x => x.score) }]
+    });
+
+    aChart.on("click", function (params) {
+      const row = sortedAimags[params.dataIndex];
+      if (row && row.reports_url) window.location.href = row.reports_url;
+    });
+
+    window.addEventListener("resize", function () {
+      try { aChart.resize(); } catch (e) {}
+    });
+  }
+
+  // Org readiness ranking
+  const oEl = document.getElementById("org_readiness_chart");
+  if (oEl && Array.isArray(orgs) && orgs.length) {
+    const sortedOrgs = [...orgs].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 15);
+    const oChart = echarts.init(oEl);
+
+    oChart.setOption({
+      title: {
+        text: "Organization Readiness Ranking",
+        left: "center",
+        textStyle: { fontSize: 14 }
+      },
+      tooltip: { trigger: "axis" },
+      grid: { left: 180, right: 20, top: 60, bottom: 30 },
+      xAxis: { type: "value", max: 100 },
+      yAxis: { type: "category", data: sortedOrgs.map(x => x.label) },
+      series: [{ type: "bar", data: sortedOrgs.map(x => x.score) }]
+    });
+
+    oChart.on("click", function (params) {
+      const row = sortedOrgs[params.dataIndex];
+      if (row && row.reports_url) window.location.href = row.reports_url;
+    });
+
+    window.addEventListener("resize", function () {
+      try { oChart.resize(); } catch (e) {}
+    });
+  }
+})();
+</script>
 
 <script>
-  // ---- Safe JSON reads
-  const statusSeries = JSON.parse(document.getElementById('status-data')?.textContent || "[]");
-  const wf = JSON.parse(document.getElementById('workflow-data')?.textContent || '{"axis":[], "ms":[], "ca":[]}');
-  const points = JSON.parse(document.getElementById('points-data')?.textContent || "[]");
-  const vb = JSON.parse(document.getElementById('verif-buckets-data')?.textContent || '{"expired":0,"due30":0,"due90":0}');
+(function () {
+  if (typeof L === "undefined") return;
 
-  // ---- Verification Trend
-  // (backend чинь энэ string-г бэлдэж өгдөг гэж үзэв)
-  let trendData = null;
-  try {
-    trendData = JSON.parse('{{ echarts_verif_trend_json|escapejs }}');
-  } catch (e) {
-    trendData = null;
+  const points = {{ locations_json|default:"[]"|safe }};
+  const mapEl = document.getElementById("station_map");
+  if (!mapEl) return;
+
+  const map = L.map("station_map").setView([47.9, 106.9], 5);
+
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 18,
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(map);
+
+  function markerColor(status) {
+    if (status === "PENDING") return "#ffc107";
+    if (status === "BROKEN") return "#dc3545";
+    if (status === "EMPTY") return "#6c757d";
+    return "#28a745";
   }
 
-  // ---- Verification Pie (Expired / Due<=30 / Due<=90)
-  const vpEl = document.getElementById("verifPie");
-  if (vpEl && window.echarts) {
-    const vp = echarts.init(vpEl);
-    const pieData = [
-      { name: "Expired", value: vb.expired || 0, key: "expired" },
-      { name: "Due ≤30", value: vb.due30 || 0, key: "due30" },
-      { name: "Due ≤90", value: vb.due90 || 0, key: "due90" },
-    ];
-    vp.setOption({
-      tooltip: { trigger: 'item', formatter: '{b}: <b>{c}</b> ({d}%)' },
-      series: [{
-        type: 'pie',
-        radius: ['40%', '70%'],
-        avoidLabelOverlap: true,
-        label: { show: true, formatter: '{b}: {c}' },
-        data: pieData
-      }]
-    });
+  points.forEach(function (s) {
+    if (s.lat == null || s.lon == null) return;
 
-    // click -> open Device changelist with date filters
-    const baseUrl = "{{ device_changelist_url|escapejs }}";
-    const field = "{{ verif_field|escapejs }}";
-    const today = "{{ today_iso|escapejs }}";
-    const d30 = "{{ due30_iso|escapejs }}";
-    const d90 = "{{ due90_iso|escapejs }}";
-    const d30p1 = "{{ due30_plus1_iso|escapejs }}";
+    const color = markerColor(s.status);
+    const marker = L.circleMarker([s.lat, s.lon], {
+      radius: 7,
+      color: color,
+      fillColor: color,
+      fillOpacity: 0.85,
+      weight: 1
+    }).addTo(map);
 
-    function goFilter(key) {
-      let url = baseUrl || "";
-      if (!url) return;
-      url += (url.includes("?") ? "&" : "?");
-
-      if (key === "expired") {
-        url += `${field}__lt=` + encodeURIComponent(today);
-      } else if (key === "due30") {
-        url += `${field}__range=` + encodeURIComponent(today + "," + d30);
-      } else if (key === "due90") {
-        url += `${field}__range=` + encodeURIComponent(d30p1 + "," + d90);
-      }
-      window.location.href = url;
-    }
-
-    vp.on('click', (params) => {
-      const k = params?.data?.key || null;
-      if (k) goFilter(k);
-    });
-  }
-
-  // ---- Status Pie
-  const stEl = document.getElementById("chartStatus");
-  if (stEl && window.echarts) {
-    const st = echarts.init(stEl);
-    st.setOption({
-      tooltip: { trigger: 'item', formatter: '{b}: <b>{c}</b> ({d}%)' },
-      series: [{
-        type: 'pie',
-        radius: ['40%', '70%'],
-        avoidLabelOverlap: true,
-        label: { show: true, formatter: '{b}: {c}' },
-        data: statusSeries.map(x => ({ name: x.name, value: x.value, url: x.url }))
-      }]
-    });
-    st.on('click', (p) => { if (p?.data?.url) window.location.href = p.data.url; });
-  }
-
-  // ---- Workflow stacked bar
-  const wfEl = document.getElementById("chartWorkflow");
-  if (wfEl && window.echarts) {
-    const wfChart = echarts.init(wfEl);
-    wfChart.setOption({
-      tooltip: { trigger: 'axis' },
-      legend: { data: ['Maintenance', 'Control'] },
-      xAxis: { type: 'category', data: wf.axis || [] },
-      yAxis: { type: 'value' },
-      series: [
-        { name: 'Maintenance', type: 'bar', stack: 'wf', data: wf.ms || [] },
-        { name: 'Control', type: 'bar', stack: 'wf', data: wf.ca || [] }
-      ]
-    });
-  }
-
-  // ---- Trend line chart (optional)
-  const vtEl = document.getElementById('verifTrendChart');
-  if (vtEl && trendData && trendData.axis && window.echarts) {
-    const vtChart = echarts.init(vtEl);
-    vtChart.setOption({
-      tooltip: { trigger: 'axis' },
-      legend: { data: ['Хугацаа хэтэрсэн', '30 хоногт дуусах', '90 хоногт дуусах'] },
-      xAxis: { type: 'category', data: trendData.axis },
-      yAxis: { type: 'value' },
-      series: [
-        { name: 'Хугацаа хэтэрсэн', type: 'line', data: trendData.expired || [], smooth: true },
-        { name: '30 хоногт дуусах', type: 'line', data: trendData.due30 || [], smooth: true },
-        { name: '90 хоногт дуусах', type: 'line', data: trendData.due90 || [], smooth: true }
-      ]
-    });
-  }
-
-  // ---- Leaflet map
-  const mapEl = document.getElementById("map");
-  if (mapEl && window.L) {
-    const map = L.map('map').setView([47.918, 106.917], 5);
-
-    // NOTE: интернэтгүй үед tile харагдахгүй байж болно.
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
-
-    function markerColor(p) {
-      if ((p.pending_total || 0) > 0) return "#f59e0b";
-      if (p.status === "BROKEN") return "#ef4444";
-      if (p.status === "EMPTY") return "#64748b";
-      return "#10b981";
-    }
-
-    points.forEach(p => {
-      const c = markerColor(p);
-      const m = L.circleMarker([p.lat, p.lon], {
-        radius: 7, color: c, weight: 2, fillColor: c, fillOpacity: 0.9
-      }).addTo(map);
-
-      const html = `
-        <div style="font-weight:800;margin-bottom:6px;">${p.name || ""}</div>
-        <div style="margin-bottom:6px;">Pending: <b>${p.pending_total || 0}</b></div>
-        <div style="display:flex;gap:10px;">
-          <a href="${p.loc_admin_url || "#"}">Location</a>
-          <a href="${p.device_list_url || "#"}">Devices</a>
-        </div>
-      `;
-      m.bindPopup(html);
-    });
-  }
-
-  // ---- Resize charts on window resize
-  window.addEventListener("resize", () => {
-    try { echarts.getInstanceByDom(document.getElementById("chartStatus"))?.resize(); } catch(e){}
-    try { echarts.getInstanceByDom(document.getElementById("chartWorkflow"))?.resize(); } catch(e){}
-    try { echarts.getInstanceByDom(document.getElementById("verifPie"))?.resize(); } catch(e){}
-    try { echarts.getInstanceByDom(document.getElementById("verifTrendChart"))?.resize(); } catch(e){}
+    marker.bindPopup(`
+      <b>${s.name || "-"}</b><br>
+      Төлөв: ${s.status || "-"}<br>
+      Pending: ${s.pending_total || 0}<br>
+      <a href="${s.loc_admin_url || '#'}">Станц нээх</a>
+    `);
   });
+})();
 </script>
 {% endblock %}

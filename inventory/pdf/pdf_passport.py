@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 import io
-import os
-from datetime import datetime
+import uuid
 
 import qrcode
-from django.utils import timezone
+from django.urls import reverse
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
@@ -27,12 +26,9 @@ from inventory.pdf_passport import register_fonts
 
 
 def build_device_timeline(device, limit: int = 15):
-    """
-    Returns list of rows for timeline table.
-    """
     rows = []
 
-    # DeviceMovement (if exists)
+    # DeviceMovement
     try:
         qs = DeviceMovement.objects.filter(device=device).order_by("-moved_at")[:limit]
         for m in qs:
@@ -64,7 +60,6 @@ def build_device_timeline(device, limit: int = 15):
     except Exception:
         pass
 
-    # newest first
     rows.sort(key=lambda r: r[0], reverse=True)
     return rows[:limit]
 
@@ -85,8 +80,23 @@ def generate_device_passport_pdf_bytes(device, request=None) -> bytes:
     else:
         base_url = "http://127.0.0.1:8000"
 
+    # ✅ token байхгүй бол үүсгээд хадгал
     token = getattr(device, "qr_token", None)
-    qr_url = f"{base_url}/qr/public/{token}/" if token else base_url
+    if not token:
+        token = uuid.uuid4()
+        device.qr_token = token
+        try:
+            device.save(update_fields=["qr_token"])
+        except Exception:
+            device.save()
+
+    # ✅ URL-аа urls.py-ийн нэрээр гаргана (meteo_config/urls.py: name="qr_public")
+    try:
+        public_path = reverse("qr_public", args=[str(token)])
+    except Exception:
+        public_path = f"/qr/{token}/"
+
+    qr_url = f"{base_url}{public_path}"
 
     # styles
     styles = getSampleStyleSheet()
@@ -149,13 +159,13 @@ def generate_device_passport_pdf_bytes(device, request=None) -> bytes:
     elements.append(top_tbl)
     elements.append(Spacer(1, 10))
 
-    # Device details table (minimal, expand as needed)
+    # Device details
     elements.append(Paragraph("ҮНДСЭН МЭДЭЭЛЭЛ", style_h))
     rows = [
         ["ID", str(getattr(device, "id", "") or "")],
         ["Төрөл", kind],
         ["Инв №", inv],
-        ["Серийн дугаар", str(getattr(device, "serial_no", "") or "")],
+        ["Серийн дугаар", str(getattr(device, "serial_number", "") or getattr(device, "serial_no", "") or "")],
         ["Байршил", str(getattr(getattr(device, "location", None), "name", "") or "")],
     ]
     t = Table(rows, colWidths=[5 * cm, 11 * cm])

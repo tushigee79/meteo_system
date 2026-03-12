@@ -23,9 +23,9 @@ class Command(BaseCommand):
         created = 0
         for d in DISTRICTS:
             obj, was_created = SumDuureg.objects.get_or_create(
-                aimag_ref=ub,   # ✅ aimag биш, aimag_ref
+                aimag=ub,
                 name=d,
-                defaults={"code": "", "is_ub_district": True},
+                defaults={"code": ""},
             )
             if was_created:
                 created += 1
