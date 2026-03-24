@@ -1,0 +1,125 @@
+{% extends "admin/base_site.html" %}
+
+{% block extrahead %}
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+    <style>
+        .card { border-radius: 10px; margin-bottom: 20px; border: none; }
+        .kpi-card { transition: transform 0.2s; }
+        .kpi-card:hover { transform: scale(1.05); }
+        h5 { font-weight: bold; color: #444; margin-bottom: 15px; }
+    </style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <h2 class="mb-4 text-center font-weight-bold">{{ title }}</h2>
+
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card kpi-card bg-primary text-white p-4 text-center shadow">
+                <h2 class="font-weight-bold">{{ total_devices }}</h2>
+                <p class="mb-0">Нийт багаж</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card kpi-card bg-success text-white p-4 text-center shadow">
+                <h2 class="font-weight-bold">{{ active_devices }}</h2>
+                <p class="mb-0">Бэлэн (Ажиллаж буй)</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card kpi-card bg-danger text-white p-4 text-center shadow">
+                <h2 class="font-weight-bold">{{ broken_devices }}</h2>
+                <p class="mb-0">Эвдрэлтэй / Засварт</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card kpi-card bg-warning text-dark p-4 text-center shadow">
+                <h2 class="font-weight-bold">{{ expired_count }}</h2>
+                <p class="mb-0">Ашиглалтын хугацаа дууссан</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-5">
+            <div class="card p-4 shadow h-100">
+                <h5 class="text-center">Багажнуудын ашиглалтын төлөв</h5>
+                <div style="position: relative; height:300px;">
+                    <canvas id="statusChart"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-7">
+            <div class="card p-4 shadow h-100">
+                <h5 class="text-center">Хамгийн их эвдрэлтэй аймгууд (Top 10)</h5>
+                <div style="position: relative; height:300px;">
+                    <canvas id="aimagChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+    // 1. Төлөвийн график (Doughnut Chart)
+    // views.py-ээс ирсэн 'status_stats_json' өгөгдлийг унших
+    const statusRawData = JSON.parse('{{ status_stats_json|safe }}');
+    
+    // Төлөвийн нэрсийг Монголоор харуулах хөрвүүлэлт
+    const statusLabels = {
+        'Active': 'Ашиглагдаж буй',
+        'Broken': 'Эвдрэлтэй',
+        'Repair': 'Засварт байгаа',
+        'Spare': 'Нөөцөд байгаа',
+        'Retired': 'Ашиглалтаас гарсан'
+    };
+
+    new Chart(document.getElementById('statusChart'), {
+        type: 'doughnut',
+        data: {
+            labels: statusRawData.map(item => statusLabels[item.status] || item.status),
+            datasets: [{
+                data: statusRawData.map(item => item.count),
+                backgroundColor: ['#28a745', '#dc3545', '#ffc107', '#17a2b8', '#6c757d'],
+                borderWidth: 2
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom' }
+            }
+        }
+    });
+
+    // 2. Аймгуудын график (Bar Chart)
+    const aimagData = JSON.parse('{{ aimag_stats_json|safe }}');
+    new Chart(document.getElementById('aimagChart'), {
+        type: 'bar',
+        data: {
+            labels: aimagData.map(item => item.name),
+            datasets: [{
+                label: 'Эвдрэлтэй байгаа багажны тоо',
+                data: aimagData.map(item => item.broken_count),
+                backgroundColor: '#dc3545',
+                borderRadius: 5
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            scales: {
+                y: { 
+                    beginAtZero: true,
+                    ticks: { stepSize: 1 }
+                }
+            },
+            plugins: {
+                legend: { display: false }
+            }
+        }
+    });
+</script>
+{% endblock %}

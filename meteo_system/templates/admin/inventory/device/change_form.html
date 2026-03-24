@@ -1,0 +1,22 @@
+{% extends "admin/change_form.html" %}
+{% load static i18n admin_urls %}
+
+{% block extrahead %}
+  {{ block.super }}
+  <script>
+    window.__deviceSumsUrl = "{% url 'inventory:ajax_load_sums' %}";
+    window.__deviceLocUrl  = "{% url 'inventory_admin:inventory_device_device_location_options' %}";
+    window.__deviceCatalogUrl = "{% url 'inventory_admin:inventory_device_device_catalog_by_kind' %}";
+  </script>
+{% endblock %}
+
+{% block object-tools-items %}
+  {{ block.super }}
+  {% if original and original.pk %}
+    <li>
+      <a class="historylink" href="{% url 'inventory_admin:inventory_device_passport' original.pk %}">
+        Device Passport PDF
+      </a>
+    </li>
+  {% endif %}
+{% endblock %}

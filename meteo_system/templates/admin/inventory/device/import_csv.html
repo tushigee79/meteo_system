@@ -1,0 +1,9 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>Device CSV Import</h1>
+<form method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+  <p>Энд CSV upload хийдэг болгоно (дараагийн алхам).</p>
+  <button class="default" type="submit">Тест ажиллуулах</button>
+</form>
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div class="card card-primary card-outline" style="max-width: 600px; margin: 20px auto;">
+  <div class="card-header"><b>Станц/Харуул импортлох</b></div>
+  <div class="card-body">
+    <form method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+      <div class="form-group">
+        <label>Станцын төрөл сонгох:</label>
+        <select name="station_type" class="form-control" required>
+          <option value="METEO">Цаг уурын станц (METEO)</option>
+          <option value="HYDRO">Ус судлалын харуул (HYDRO)</option>
+          <option value="AWS">Автомат станц (AWS)</option>
+        </select>
+      </div>
+      <div class="form-group mt-3">
+        <label>CSV Файл:</label>
+        <input type="file" name="csv_file" class="form-control" accept=".csv" required>
+      </div>
+      <div class="mt-4">
+        <button class="btn btn-success" type="submit">📥 Импорт хийх</button>
+        <a class="btn btn-default" href="..">Буцах</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

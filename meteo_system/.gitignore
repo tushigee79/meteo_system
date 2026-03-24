@@ -1,0 +1,69 @@
+# =========================
+
+# Python
+
+# =========================
+
+**pycache**/
+*.py[cod]
+*.pyo
+*.pyd
+*.log
+
+# =========================
+
+# Virtual environment
+
+# =========================
+
+venv/
+.venv/
+
+# =========================
+
+# Django
+
+# =========================
+
+db.sqlite3
+*.sqlite3
+media/
+staticfiles/
+
+# =========================
+
+# Environment / secrets
+
+# =========================
+
+.env
+.env.*
+*.env
+
+# =========================
+
+# OS files
+
+# =========================
+
+.DS_Store
+Thumbs.db
+
+# =========================
+
+# Backups / temp
+
+# =========================
+
+*.bak
+*.bak2
+*.rej
+*.patch
+*.gitpatch
+*.zip
+
+# Local data / imports
+
+import_data/
+**untracked_backup**/
+**untracked_hold**/

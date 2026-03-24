@@ -4,13 +4,36 @@ import uuid
 from django.contrib import messages
 from django.http import HttpResponse
 from django.utils.html import format_html
-
+from django.urls import path
 try:
     import qrcode
 except Exception:  # pragma: no cover
     qrcode = None
 
+class QRAdminMixin:
+    """
+    Optional mixin for QR-related admin actions.
+    Safe to use even if some QR endpoints are not ready yet.
+    """
 
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "<int:object_id>/open-qr/",
+                self.admin_site.admin_view(self.open_qr_view),
+                name="inventory_device_open_qr",
+            ),
+        ]
+        return custom_urls + urls
+
+    def open_qr_view(self, request, object_id):
+        obj = self.get_object(request, object_id)
+        token = getattr(obj, "public_token", None)
+        if token:
+            return HttpResponseRedirect(f"/qr/public/{token}/")
+        return HttpResponseRedirect("../")
+    
 def generate_qr_token(modeladmin, request, queryset):
     updated = 0
     for obj in queryset:

@@ -1,6 +1,5 @@
+# inventory/admin/admin_filters.py
 from django.contrib import admin
-from django.utils import timezone
-from datetime import timedelta
 
 from inventory.models import Aimag, SumDuureg
 
@@ -10,14 +9,21 @@ class AimagListFilter(admin.SimpleListFilter):
     parameter_name = "aimag"
 
     def lookups(self, request, model_admin):
-        return [(str(a.id), a.name) for a in Aimag.objects.all().order_by("name")]
+        return [(str(a.pk), a.name) for a in Aimag.objects.all().order_by("name")]
 
     def queryset(self, request, queryset):
-        if self.value():
-            if hasattr(queryset.model, "aimag_id"):
-                return queryset.filter(aimag_id=self.value())
-            if hasattr(queryset.model, "location"):
-                return queryset.filter(location__aimag_id=self.value())
+        value = self.value()
+        if not value:
+            return queryset
+
+        # Device -> location__aimag_ref
+        if hasattr(queryset.model, "location"):
+            return queryset.filter(location__aimag_ref_id=value)
+
+        # Location -> aimag_ref
+        if hasattr(queryset.model, "aimag_ref"):
+            return queryset.filter(aimag_ref_id=value)
+
         return queryset
 
 
@@ -26,18 +32,23 @@ class SumListFilter(admin.SimpleListFilter):
     parameter_name = "sum"
 
     def lookups(self, request, model_admin):
-        qs = SumDuureg.objects.all().order_by("name")
         aimag_id = request.GET.get("aimag")
+        qs = SumDuureg.objects.all().order_by("name")
         if aimag_id:
-            qs = qs.filter(aimag_id=aimag_id)
-        return [(str(s.id), s.name) for s in qs]
+            qs = qs.filter(aimag_ref_id=aimag_id)
+        return [(str(s.pk), s.name) for s in qs]
 
     def queryset(self, request, queryset):
-        if self.value():
-            if hasattr(queryset.model, "sum_id"):
-                return queryset.filter(sum_id=self.value())
-            if hasattr(queryset.model, "location"):
-                return queryset.filter(location__sum_id=self.value())
+        value = self.value()
+        if not value:
+            return queryset
+
+        if hasattr(queryset.model, "location"):
+            return queryset.filter(location__sum_ref_id=value)
+
+        if hasattr(queryset.model, "sum_ref"):
+            return queryset.filter(sum_ref_id=value)
+
         return queryset
 
 

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: 'Arial', sans-serif; font-size: 12px; line-height: 1.6; }
+        .header { text-align: center; font-weight: bold; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { border: 1px solid black; padding: 8px; text-align: left; }
+        .footer { margin-top: 30px; }
+        .signature { margin-top: 50px; display: flex; justify-content: space-between; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>ЗАХИАЛГЫН ХУУДАС № {{ order.order_no }}</h2>
+        <p>Огноо: {{ order.created_at|date:"Y-m-d" }}</p>
+    </div>
+
+    <p><strong>Захиалагч аймаг:</strong> {{ order.aimag.name }}</p>
+    <p><strong>Инженер:</strong> {{ order.engineer.get_full_name }}</p>
+    <p><strong>Станц:</strong> {{ order.station.name }} ({{ order.station.wmo_index }})</p>
+
+    <table>
+        <thead>
+            <tr style="background-color: #f2f2f2;">
+                <th>№</th>
+                <th>Багажны төрөл</th>
+                <th>Сэлбэг, хэрэгслийн нэр</th>
+                <th>Загвар / Сери №</th>
+                <th>Тоо</th>
+                <th>Тайлбар</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td>{{ forloop.counter }}</td>
+                <td>{{ item.device_type.name }}</td>
+                <td>{{ item.part_name }}</td>
+                <td>{{ item.model_name }} / {{ item.serial_no }}</td>
+                <td>{{ item.quantity }}</td>
+                <td>{{ item.note }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="footer">
+        <p><strong>Техникийн үндэслэл:</strong></p>
+        <p>{{ order.description }}</p>
+    </div>
+
+    <div class="signature">
+        <p>Хянасан: ........................... (Хэлтсийн дарга)</p>
+        <p>Захиалсан: ........................... (Инженер)</p>
+    </div>
+</body>
+</html>

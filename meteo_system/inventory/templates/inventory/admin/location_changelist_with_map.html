@@ -1,0 +1,51 @@
+{% extends "admin/change_list.html" %}
+{% load static %}
+
+{% block extrahead %}
+  {{ block.super }}
+  <style>
+  /* ✅ Jazzmin/Django admin content-г бүтэн өргөн болгоно */
+  .content-wrapper .content,
+  .content-wrapper #content {
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* ✅ Map embed card */
+  .locmap-embed-wrap{
+    width: 100% !important;
+    margin: 12px 0 16px;
+    border: 1px solid rgba(0,0,0,.08);
+    border-radius: 12px;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: 0 8px 18px rgba(0,0,0,.08);
+  }
+
+  /* ✅ iframe-г өндөр, бүтэн өргөн */
+  .locmap-embed-iframe{
+    width: 100% !important;
+    height: calc(100vh - 260px) !important;  /* хүсвэл 72vh болгож болно */
+    min-height: 720px !important;
+    border: 0;
+    display:block;
+    background: #f6f7f9;
+  }
+</style>
+
+{% endblock %}
+
+{% block content %}
+  <div class="locmap-embed-wrap">
+    <div class="locmap-embed-head">
+      <div class="locmap-embed-title">📍 Улсын сүлжээний газрын зураг</div>
+      <div class="locmap-embed-actions">
+        <a href="{% url 'inventory:inventory_map' %}" target="_blank" rel="noopener">Газрын зургийг тусад нь нээх</a>
+      </div>
+    </div>
+    <iframe class="locmap-embed-iframe"
+            src="{% url 'inventory:inventory_map' %}"
+            loading="lazy"></iframe>
+  </div>
+  {{ block.super }}
+{% endblock %}

@@ -1,0 +1,87 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block extrastyle %}
+<link rel="stylesheet" href="{% static 'admin/css/vendor/select2/select2.min.css' %}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+<style>
+    .rh-filter-card { background: #fff; border-radius: 8px; border: 1px solid #e3e6f0; padding: 20px; margin-bottom: 25px; box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.1); }
+    .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+    .filter-group label { display: block; font-weight: bold; font-size: 12px; color: #4e73df; text-transform: uppercase; margin-bottom: 5px; }
+    .rh-input { width: 100%; padding: 8px; border: 1px solid #d1d3e2; border-radius: 5px; }
+    .btn-submit { background: #4e73df; color: #fff; border: none; padding: 10px 20px; border-radius: 5px; font-weight: bold; cursor: pointer; }
+    .btn-export { background: #f8f9fc; border: 1px solid #d1d3e2; padding: 8px 12px; border-radius: 5px; font-size: 12px; text-decoration: none; color: #5a5c69; transition: 0.2s; }
+    .btn-export:hover { background: #eaecf4; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 1400px; margin: 0 auto;">
+    <h1 class="h3 mb-4 text-gray-800"><i class="fas fa-chart-line"></i> Тайлангийн төв</h1>
+
+    <form method="get" action="{{ hub_url }}" id="rhForm" class="rh-filter-card">
+        <div class="filter-grid">
+            <div class="filter-group">
+                <label>Багажны төрөл (Kind)</label>
+                <select name="kind" id="id_kind" class="rh-input select2">
+                    <option value="">-- Бүх төрөл --</option>
+                    {% for k, v in KIND_CHOICES %}
+                        <option value="{{ k }}" {% if filter.kind == k %}selected{% endif %}>{{ v }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Аймаг</label>
+                <select name="aimag" id="id_aimag" class="rh-input select2">
+                    <option value="">-- Бүх аймаг --</option>
+                    {% for a in AIMAG_CHOICES %}
+                        <option value="{{ a.0 }}" {% if filter.aimag == a.0|stringformat:"s" %}selected{% endif %}>{{ a.1 }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Төлөв (Status)</label>
+                <select name="status" class="rh-input select2">
+                    <option value="">-- Бүх төлөв --</option>
+                    {% for k, v in STATUS_CHOICES %}
+                        <option value="{{ k }}" {% if filter.status == k %}selected{% endif %}>{{ v }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Огноо (From)</label>
+                <input type="date" name="date_from" value="{{ filter.date_from }}" class="rh-input">
+            </div>
+            <div class="filter-group">
+                <label>Огноо (To)</label>
+                <input type="date" name="date_to" value="{{ filter.date_to }}" class="rh-input">
+            </div>
+        </div>
+
+        <div class="mt-4 d-flex justify-content-between align-items-center flex-wrap" style="gap: 15px;">
+            <button type="submit" class="btn-submit"><i class="fas fa-sync-alt"></i> Шүүх</button>
+            <div class="export-actions">
+                <span class="small text-muted mr-2">Экспортлох:</span>
+                {% for e in EXPORT_LINKS %}
+                    <a href="{{ e.url }}?{{ request.GET.urlencode }}" class="btn-export">
+                        <i class="fas fa-file-excel text-success"></i> {{ e.label }}
+                    </a>
+                {% endfor %}
+            </div>
+        </div>
+    </form>
+
+    <div class="row">
+        </div>
+</div>
+
+<script src="{% static 'admin/js/vendor/jquery/jquery.min.js' %}"></script>
+<script src="{% static 'admin/js/vendor/select2/select2.full.min.js' %}"></script>
+<script>
+    (function($){
+        $(document).ready(function(){
+            $('.select2').select2({ width: '100%' });
+        });
+    })(django.jQuery);
+</script>
+{% endblock %}

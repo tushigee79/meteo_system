@@ -12,7 +12,11 @@ urlpatterns = [
     # Main custom admin
     path("admin/", inventory_admin_site.urls),
 
-    # Legacy redirect
+    # Legacy redirects
+    path(
+        "django-admin/",
+        RedirectView.as_view(url="/admin/", permanent=False),
+    ),
     re_path(
         r"^django-admin/(?P<extra>.*)$",
         RedirectView.as_view(url="/admin/%(extra)s", permanent=False),
@@ -24,3 +28,5 @@ urlpatterns = [
 
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

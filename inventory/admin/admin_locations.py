@@ -1,68 +1,62 @@
+# inventory/admin/admin_locations.py
 from django.contrib import admin
-from django import forms
-from inventory.models import Location, Device
-from .admin_site import inventory_admin_site
+
+from inventory.models import Location
 
 
-@admin.register(Location, site=inventory_admin_site)
 class LocationAdmin(admin.ModelAdmin):
-    pass
-
-
-@admin.register(Device, site=inventory_admin_site)
-class DeviceAdmin(admin.ModelAdmin):
-    pass
-
-class LocationAdminForm(forms.ModelForm):
-    class Meta:
-        model = Location
-        fields = "__all__"
-
-    class Media:
-        js = (
-            "admin/js/location_cascade.js",
-        )
-
-
-@admin.register(Location, site=inventory_admin_site)
-class LocationAdmin(admin.ModelAdmin):
-    form = LocationAdminForm
-
     list_display = (
+        "id",
         "name",
         "location_type",
-        "aimag",
-        "sum",
+        "aimag_ref",
+        "sum_ref",
         "latitude",
         "longitude",
-        "is_active",
+        "device_count",
     )
     list_filter = (
         "location_type",
-        "is_active",
-        AimagListFilter,
-        SumListFilter,
+        "aimag_ref",
+        "sum_ref",
     )
     search_fields = (
         "name",
         "code",
         "wigos_id",
     )
-    autocomplete_fields = ()
+    ordering = ("name",)
     list_per_page = 50
 
     fieldsets = (
         ("Үндсэн мэдээлэл", {
-            "fields": ("name", "code", "location_type", "is_active"),
+            "fields": (
+                "name",
+                "code",
+                "location_type",
+                "organization",
+            )
         }),
-        ("Захиргааны байршил", {
-            "fields": ("aimag", "sum"),
+        ("Байршил", {
+            "fields": (
+                "aimag_ref",
+                "sum_ref",
+                "latitude",
+                "longitude",
+                "elevation",
+            )
         }),
-        ("Координат", {
-            "fields": ("latitude", "longitude", "elevation_m"),
-        }),
-        ("WMO / OSCAR", {
-            "fields": ("wigos_id",),
+        ("WMO / Metadata", {
+            "fields": (
+                "wigos_id",
+            ),
             "classes": ("collapse",),
         }),
     )
+
+    @admin.display(description="Багажийн тоо")
+    def device_count(self, obj):
+        try:
+            return obj.device_set.count()
+        except Exception:
+            return 0

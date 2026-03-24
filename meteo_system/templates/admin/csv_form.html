@@ -1,0 +1,45 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div id="content-main">
+    <h2>Станц бөөнөөр бүртгэх</h2>
+    <form action="." method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <fieldset class="module aligned">
+            <div class="form-row">
+                <label class="required" for="id_aimag">Аймаг/Нийслэл сонгох:</label>
+                <select name="aimag" id="id_aimag" required>
+                    <option value="">---------</option>
+                    {% for aimag in aimags %}
+                        <option value="{{ aimag.id }}">{{ aimag.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div class="form-row">
+                <label class="required" for="id_type">Станцын төрөл:</label>
+                <select name="location_type" id="id_type" required>
+                    {% for val, label in location_types %}
+                        <option value="{{ val }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-row">
+                <label class="required" for="id_csv_file">CSV файл:</label>
+                <input type="file" name="csv_file" id="id_csv_file" accept=".csv" required>
+            </div>
+        </fieldset>
+
+        <div class="submit-row">
+            <input type="submit" value="Импортлох" class="default">
+            <a href=".." class="button cancel-link">Буцах</a>
+        </div>
+    </form>
+</div>
+
+<style>
+    .form-row { padding: 15px; border-bottom: 1px solid #eee; }
+    .form-row label { display: inline-block; width: 160px; font-weight: bold; }
+    select, input[type="file"] { padding: 5px; width: 300px; }
+</style>
+{% endblock %}
